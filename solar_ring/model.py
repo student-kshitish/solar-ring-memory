@@ -92,6 +92,7 @@ class SolarRingModel(nn.Module):
         all_logits = []
         all_role_logits = []
         all_spawn_logits = []
+        all_context_vecs = []
 
         for b in range(B):
             # hard_lock=True at inference so subject/object poles are immutable;
@@ -143,6 +144,7 @@ class SolarRingModel(nn.Module):
             # Flatten memory to fixed representation
             flat = memory.flatten()                          # (FLAT_SIZE,)
             mem_vec = self.out_norm(self.W_out(flat.float()).to(dtype))  # (d,)
+            all_context_vecs.append(mem_vec)                 # for classification head
 
             # Combine per-token representations with memory context
             seq_tensor = torch.stack(seq_logits, dim=0)     # (T, d)
@@ -153,16 +155,19 @@ class SolarRingModel(nn.Module):
             all_role_logits.append(torch.stack(seq_role_logits))   # (T, NUM_ROLES)
             all_spawn_logits.append(torch.stack(seq_spawn_logits)) # (T,)
 
-        logits_out = torch.stack(all_logits, dim=0)          # (B, T, V)
-        role_out   = torch.stack(all_role_logits, dim=0)     # (B, T, NUM_ROLES)
-        spawn_out  = torch.stack(all_spawn_logits, dim=0)    # (B, T)
+        logits_out  = torch.stack(all_logits, dim=0)          # (B, T, V)
+        role_out    = torch.stack(all_role_logits, dim=0)     # (B, T, NUM_ROLES)
+        spawn_out   = torch.stack(all_spawn_logits, dim=0)    # (B, T)
+        context_out = torch.stack(all_context_vecs, dim=0)    # (B, d)
 
         if squeeze:
-            logits_out = logits_out.squeeze(0)
-            role_out   = role_out.squeeze(0)
-            spawn_out  = spawn_out.squeeze(0)
+            logits_out  = logits_out.squeeze(0)
+            role_out    = role_out.squeeze(0)
+            spawn_out   = spawn_out.squeeze(0)
+            context_out = context_out.squeeze(0)               # (d,)
 
-        aux = {"role_logits": role_out, "spawn_logits": spawn_out}
+        aux = {"role_logits": role_out, "spawn_logits": spawn_out,
+               "context_vec": context_out}
         return logits_out, aux
 
     def get_memory_for_sentence(self, token_ids: torch.Tensor,
