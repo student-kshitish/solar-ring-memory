@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+checkpoints/
+data/glove.6B.300d.txt
+data/glove.6B.zip
+data/glove.6B.300d.txt
+data/glove.6B.zip
+*.pt
+*.pth
