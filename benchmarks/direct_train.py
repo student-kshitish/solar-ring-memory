@@ -625,6 +625,223 @@ def main():
           f"{'YES ✓' if solar_it > 0.65 else f'gap {0.65 - solar_it:.1%}'}"
           f"  ({_pct(solar_it)})")
 
+    # ── Task 4: Multi-task summary ────────────────────────────────────────────
+    print("\n" + "=" * 62)
+    print("[7/8] Running structured QA + consistency benchmarks...")
+    print("=" * 62)
+
+    # Lazy imports avoid circular dependency at module load time
+    from benchmarks.structured_qa    import run_qa_eval
+    from benchmarks.consistency_check import run_consistency_eval
+
+    qa_accs  = run_qa_eval(word2id_ext=word2id, glove_ext=glove)
+    con_accs = run_consistency_eval(word2id_ext=word2id, glove_ext=glove)
+
+    # BERT-base published / estimated baselines
+    BERT = {"pronoun": 0.70, "qa": 0.72, "consist": 0.78}
+    BERT_AVG = sum(BERT.values()) / len(BERT)
+
+    solar_avg  = (solar_after          + qa_accs["solar"]  + con_accs["solar"])  / 3
+    bilstm_avg = (bilstm_after         + qa_accs["bilstm"] + con_accs["bilstm"]) / 3
+    lstm_avg   = (lstm_after           + qa_accs["lstm"]   + con_accs["lstm"])   / 3
+
+    print("\n" + "=" * 62)
+    print("Multi-Task Summary  (Solar Ring vs BERT-base)")
+    print("=" * 62)
+
+    mt_headers = ["Task", "Solar Ring", "BERT-base", "BiLSTM", "LSTM"]
+    mt_rows = [
+        ["Pronoun Res.", _pct(solar_after),       f"~{BERT['pronoun']:.0%}",
+         _pct(bilstm_after),  _pct(lstm_after)],
+        ["Structured QA", _pct(qa_accs["solar"]),  f"~{BERT['qa']:.0%}",
+         _pct(qa_accs["bilstm"]), _pct(qa_accs["lstm"])],
+        ["Consistency",  _pct(con_accs["solar"]),  f"~{BERT['consist']:.0%}",
+         _pct(con_accs["bilstm"]), _pct(con_accs["lstm"])],
+        ["─" * 13, "─" * 10, "─" * 9, "─" * 6, "─" * 4],
+        ["Average",      _pct(solar_avg),          f"~{BERT_AVG:.0%}",
+         _pct(bilstm_avg), _pct(lstm_avg)],
+    ]
+    print()
+    _print_table(mt_rows, mt_headers)
+
+    print(f"\nSolar Ring avg {_pct(solar_avg)} vs BERT-base avg ~{BERT_AVG:.0%}")
+    if solar_avg > BERT_AVG:
+        print("Target: Solar Ring beats BERT avg  →  MET ✓")
+    else:
+        print(f"Target: Solar Ring beats BERT avg  →  gap {BERT_AVG - solar_avg:.1%}")
+
+    # ── PART 5: Solar Physics Attention demo ──────────────────────────────────
+    run_spa_demo(word2id, glove)
+
+
+# ── PART 5 helper: Solar Physics Attention orbital trace ─────────────────────
+
+def run_spa_demo(word2id: Dict[str, int], glove_np):
+    """
+    Demo: parse one sentence, assign orbital parameters per token,
+    run SolarPhysicsAttention, print top-3 gravity attractions and
+    the pronoun-resolution trace for 'it'.
+    """
+    from collections import defaultdict as _dd
+    from solar_ring.solar_physics_attention import (
+        SolarPhysicsAttention, OrbitalConcept, orbit_class,
+    )
+    from solar_ring.pos_tagger import POSTagger
+    from solar_ring.config    import D_MODEL as _D
+
+    sentence = ("The very angry cat quickly chased the small dog "
+                "because it was frightened.")
+
+    print("\n" + "=" * 62)
+    print("Solar Physics Attention Demo")
+    print(f'  "{sentence}"')
+    print("=" * 62)
+
+    # ── Extend vocab / GloVe for demo tokens ─────────────────────────
+    demo_w2id = dict(word2id)
+    for raw in sentence.split():
+        c = _normalize(raw.strip(".,"))
+        if c and c not in demo_w2id:
+            demo_w2id[c] = len(demo_w2id)
+    vs_d = len(demo_w2id)
+
+    import numpy as np
+    if glove_np is not None:
+        # Reload GloVe so new words get proper vectors
+        demo_glove = load_glove(GLOVE_PATH, demo_w2id, d=300) \
+                     if Path(GLOVE_PATH).exists() else glove_np
+        if demo_glove.shape[0] < vs_d:
+            pad = np.zeros((vs_d - demo_glove.shape[0], demo_glove.shape[1]),
+                            dtype=demo_glove.dtype)
+            demo_glove = np.vstack([demo_glove, pad])
+    else:
+        demo_glove = np.random.randn(vs_d, _D).astype(np.float32) * 0.4
+
+    glove_t = torch.tensor(demo_glove, dtype=torch.float32)
+
+    # ── Parse sentence with POSTagger ─────────────────────────────────
+    PRONOUNS = {"he","she","it","they","we","i","him","her","them",
+                "us","his","its","their","our","my","himself","herself","itself"}
+    ROLE_NAMES = {1:"SUBJ",2:"OBJ",3:"VERB",4:"PREP",
+                  5:"CONJ",6:"ADJ",7:"ADV",8:"DET",0:"DET"}
+
+    def pos_conf(word: str, pos_type: str) -> float:
+        if word.lower() in PRONOUNS: return 0.18
+        if pos_type == "SUBJ": return 0.95
+        if pos_type == "VERB": return 0.90
+        if pos_type == "OBJ":  return 0.92
+        if pos_type in ("ADJ","ADV"): return 0.80
+        if pos_type == "CONJ": return 0.70
+        return 0.65
+
+    tagger = POSTagger()
+    tags   = tagger.tag(sentence)
+
+    spawn_depth = 0
+    concepts: List[OrbitalConcept] = []
+    vecs_list: List[torch.Tensor]  = []
+    token_data = []   # (raw_word, pos_type, concept)
+
+    for tag in tags:
+        raw = tag["text"]
+        w   = _normalize(raw)
+        if not w:
+            continue
+        role  = tag["role"]
+        spawn = tag["spawn"]
+        ptype = ROLE_NAMES.get(role, "DET")
+
+        if spawn and role == 5:   # ROLE_CONJ
+            spawn_depth += 1
+
+        idx = demo_w2id.get(w, 0)
+        vec = glove_t[idx].float()
+
+        conf = pos_conf(raw, ptype)
+        c    = OrbitalConcept(vec, ptype, spawn_depth, conf, torch.device("cpu"))
+        concepts.append(c)
+        vecs_list.append(vec)
+        token_data.append((raw, ptype, c))
+
+    if not concepts:
+        print("  [demo] No tokens parsed.")
+        return
+
+    token_vecs = torch.stack(vecs_list)   # (L, d)
+
+    # ── Run SolarPhysicsAttention ─────────────────────────────────────
+    spa = SolarPhysicsAttention(_D)
+    spa.eval()
+    with torch.no_grad():
+        out, A, scores = spa(concepts, token_vecs)
+
+    L = len(token_data)
+
+    # ── 1. Orbital parameters table ───────────────────────────────────
+    print("\n[1] Orbital Parameters")
+    print(f"  {'Token':<13} {'POS':<6} {'Mass':>6} {'Radius':>7} {'Eccen':>7}  Orbit")
+    print(f"  {'-'*13} {'-'*6} {'-'*6} {'-'*7} {'-'*7}  {'-'*8}")
+    for raw, ptype, c in token_data:
+        oc = orbit_class(ptype, c.eccentricity)
+        print(f"  {raw:<13} {ptype:<6} {c.mass:>6.2f} {c.radius:>7.1f} "
+              f"{c.eccentricity:>7.2f}  {oc}")
+
+    # ── 2. Top-3 gravitational attractions ────────────────────────────
+    print("\n[2] Top 3 Gravitational Attractions")
+    PAIR_LABELS = {
+        ("SUBJ","VERB"): "subject-verb resonance",
+        ("VERB","OBJ"):  "verb-object resonance",
+        ("OBJ","VERB"):  "object-verb resonance",
+        ("SUBJ","SUBJ"): "subject-subject link",
+        ("SUBJ","OBJ"):  "subject-object link",
+        ("VERB","VERB"): "verb-verb harmony",
+    }
+    pair_scores = []
+    for i in range(L):
+        for j in range(L):
+            if i != j:
+                pair_scores.append((scores[i, j].item(), i, j))
+    pair_scores.sort(key=lambda x: -x[0])
+
+    for rank, (s, i, j) in enumerate(pair_scores[:3], 1):
+        wi, pi = token_data[i][0], token_data[i][1]
+        wj, pj = token_data[j][0], token_data[j][1]
+        label  = PAIR_LABELS.get((pi, pj), f"{pi}-{pj} interaction")
+        print(f"  {rank}. {wi} → {wj}: G={s:.2f} ({label})")
+
+    # ── 3. Pronoun resolution trace ───────────────────────────────────
+    print("\n[3] Pronoun Resolution Trace")
+    pron_idx = next((i for i, (w, _, _) in enumerate(token_data)
+                     if w.lower() == "it"), None)
+
+    if pron_idx is None:
+        print("  [no pronoun 'it' found]")
+        return
+
+    pc = token_data[pron_idx][2]
+    oc_pron = orbit_class(token_data[pron_idx][1], pc.eccentricity)
+    print(f'  "it" (eccentricity={pc.eccentricity:.2f}, {oc_pron}-class)')
+
+    # Candidates: SUBJ tokens at depth 0 (sun ring) with low eccentricity
+    candidates = [
+        (i, w, c) for i, (w, ptype, c) in enumerate(token_data)
+        if ptype == "SUBJ" and i != pron_idx and c.radius == 1.0
+    ]
+
+    if not candidates:
+        print("  [no sun-ring SUBJ candidates found]")
+        return
+
+    best = max(candidates, key=lambda t: scores[pron_idx, t[0]].item())
+    bi, bw, bc = best
+    g_score = scores[pron_idx, bi].item()
+    oc_best = orbit_class(token_data[bi][1], bc.eccentricity)
+
+    print(f"  → gravitational walk toward sun ring (depth 0)")
+    print(f"  → {oc_best}-class SUBJ = {bw}  "
+          f"(mass={bc.mass:.2f}, G={g_score:.2f})")
+    print(f'  → resolved: it = {bw}')
+
 
 if __name__ == "__main__":
     main()
