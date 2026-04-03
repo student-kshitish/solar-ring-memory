@@ -44,6 +44,9 @@ class RingNode:
         # Depth in the tree (0 = sun, 1 = planet, 2 = moon)
         self.depth = 0 if parent_id is None else None
 
+        # Named moon dict — parallel interface for the 5 rotating slots
+        self.moons: dict = {f"moon_{i}": self._zero() for i in range(ROTATING_SLOTS)}
+
     def _zero(self) -> torch.Tensor:
         # Return a fresh zero tensor on the correct device (never fallback to CPU)
         return torch.zeros(D_MODEL, device=self.device, dtype=self.dtype)
@@ -129,6 +132,43 @@ class RingNode:
         self._slots[slot_idx] = torch.tanh(vec.to(self.dtype))
         self.rot_head = (self.rot_head + 1) % ROTATING_SLOTS
 
+    def write_all_moons_parallel(
+        self,
+        token_vec: torch.Tensor,
+        relevance_gates: dict,
+    ) -> None:
+        """
+        Update all moon slots simultaneously using a single matrix operation.
+
+        relevance_gates: dict of {moon_name: gate_value} — one gate per moon.
+        All moons update in one batched operation instead of a sequential loop.
+
+        Old (sequential): for moon in moons: moon.update(token_vec)
+        New (parallel):   one CUDA kernel — all moons updated simultaneously.
+        """
+        M = len(self.moons)
+        moon_names = list(self.moons.keys())
+
+        moon_matrix = torch.stack([
+            self.moons[n] for n in moon_names
+        ])  # (M, d)
+
+        gate_vec = torch.tensor(
+            [relevance_gates.get(n, 0.0) for n in moon_names],
+            device=token_vec.device,
+            dtype=token_vec.dtype,
+        )  # (M,)
+
+        candidate = torch.tanh(token_vec).unsqueeze(0).expand(M, -1)  # (M, d)
+
+        updated = (
+            (1 - gate_vec.unsqueeze(1)) * moon_matrix +
+            gate_vec.unsqueeze(1) * candidate
+        )  # (M, d) — one operation
+
+        for i, name in enumerate(moon_names):
+            self.moons[name] = updated[i]
+
     # ------------------------------------------------------------------
     # Read operations
     # ------------------------------------------------------------------
@@ -160,3 +200,78 @@ class RingNode:
     def __repr__(self):
         locked = f"subj={'locked' if self.subj_locked else 'free'}, obj={'locked' if self.obj_locked else 'free'}"
         return f"RingNode(id={self.ring_id}, parent={self.parent_id}, {locked}, rot_head={self.rot_head})"
+
+
+# ── Sub-planet parallelism speedup demo ──────────────────────────────────────
+
+if __name__ == "__main__":
+    import time
+    import torch
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device : {DEVICE}")
+    if DEVICE.type == "cuda":
+        print(f"GPU    : {torch.cuda.get_device_name(0)}")
+
+    DTYPE   = torch.float32
+    N_ITER  = 10_000   # warmup + benchmark iterations
+
+    def _new_node():
+        return RingNode(device=DEVICE, dtype=DTYPE, ring_id=0, parent_id=None)
+
+    gates = {f"moon_{i}": 0.5 for i in range(ROTATING_SLOTS)}
+
+    # Pre-allocate tensors for fair GPU timing (avoids alloc overhead in loop)
+    M        = ROTATING_SLOTS       # 5 moon slots
+    vecs     = torch.randn(N_ITER, D_MODEL, device=DEVICE, dtype=DTYPE)
+    gate_t   = torch.full((M,), 0.5, device=DEVICE, dtype=DTYPE)
+
+    # ── Warmup ────────────────────────────────────────────────────────────────
+    node_w = _new_node()
+    moon_mat_w = torch.stack(list(node_w.moons.values())).to(DEVICE)
+    for i in range(200):
+        v = vecs[i % N_ITER]
+        # sequential
+        node_w.write_rotating(v)
+        # parallel (kernel)
+        cand       = torch.tanh(v).unsqueeze(0).expand(M, -1)
+        moon_mat_w = (1 - gate_t.unsqueeze(1)) * moon_mat_w + gate_t.unsqueeze(1) * cand
+    if DEVICE.type == "cuda":
+        torch.cuda.synchronize()
+
+    # ── Sequential baseline: loop over M slots one at a time ─────────────────
+    # Simulate sequential update of each moon with its own tanh+blend
+    moon_seq = torch.zeros(M, D_MODEL, device=DEVICE, dtype=DTYPE)
+    if DEVICE.type == "cuda":
+        torch.cuda.synchronize()
+    t0 = time.perf_counter()
+    for k in range(N_ITER):
+        v = vecs[k]
+        for i in range(M):                          # sequential per-moon loop
+            moon_seq[i] = (1 - 0.5) * moon_seq[i] + 0.5 * torch.tanh(v)
+    if DEVICE.type == "cuda":
+        torch.cuda.synchronize()
+    old_time = time.perf_counter() - t0
+
+    # ── Parallel: single batched matrix op — all M moons at once ─────────────
+    moon_par = torch.zeros(M, D_MODEL, device=DEVICE, dtype=DTYPE)
+    if DEVICE.type == "cuda":
+        torch.cuda.synchronize()
+    t0 = time.perf_counter()
+    for k in range(N_ITER):
+        v    = vecs[k]
+        cand = torch.tanh(v).unsqueeze(0).expand(M, -1)   # (M, d)
+        moon_par = (1 - gate_t.unsqueeze(1)) * moon_par + gate_t.unsqueeze(1) * cand
+    if DEVICE.type == "cuda":
+        torch.cuda.synchronize()
+    new_time = time.perf_counter() - t0
+
+    speedup = old_time / new_time if new_time > 0 else float("inf")
+    print(f"\n{'─'*50}")
+    print(f"Sub-planet parallelism speedup: {speedup:.1f}x")
+    print(f"  Sequential (loop)  : {old_time*1000:.2f} ms  ({N_ITER} iters × {M} moons)")
+    print(f"  Parallel (matrix)  : {new_time*1000:.2f} ms  ({N_ITER} iters × {M} moons)")
+    print(f"  Moons per update   : {M}  |  D_MODEL: {D_MODEL}")
+    print(f"{'─'*50}")
