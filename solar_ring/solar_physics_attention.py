@@ -194,3 +194,152 @@ class SolarPhysicsAttention(nn.Module):
         out      = self.W_out(attended)                    # (L, d)
 
         return out, A, scores
+
+
+# ── Standalone physics training ───────────────────────────────────────────────
+
+def train_physics(
+    spa:      "SolarPhysicsAttention",
+    pairs:    list,          # List[Tuple[str, str, str]]: (pronoun_word, correct_word, wrong_word)
+    glove,                   # numpy (vocab_size, d) or None
+    word2id:  dict,
+    device,
+    epochs:   int   = 10,
+    lr:       float = 1e-3,
+    margin:   float = 0.3,
+) -> None:
+    """
+    Train G_matrix and resonance via margin ranking loss.
+
+    Loss per pair:  L = max(0, margin − score(pronoun→correct) + score(pronoun→wrong))
+
+    Only G_matrix and resonance are updated; W_v and W_out are frozen.
+    """
+    import torch.optim as optim
+    import random
+
+    optimizer = optim.AdamW([spa.G_matrix, spa.resonance], lr=lr, weight_decay=1e-4)
+    print(f"  [train_physics]  {len(pairs)} pairs  ×  {epochs} epochs  lr={lr}")
+
+    for epoch in range(epochs):
+        random.shuffle(pairs)
+        total_loss = 0.0
+        n_active   = 0
+
+        for pron_word, corr_word, wrong_word in pairs:
+            pron_id  = word2id.get(pron_word.lower(),  0)
+            corr_id  = word2id.get(corr_word.lower(),  0)
+            wrong_id = word2id.get(wrong_word.lower(), 0)
+
+            if glove is not None:
+                import numpy as np
+                pron_vec  = torch.tensor(glove[pron_id],  dtype=torch.float32, device=device)
+                corr_vec  = torch.tensor(glove[corr_id],  dtype=torch.float32, device=device)
+                wrong_vec = torch.tensor(glove[wrong_id], dtype=torch.float32, device=device)
+            else:
+                torch.manual_seed(pron_id  % 1000)
+                pron_vec  = torch.randn(spa.d, device=device)
+                torch.manual_seed(corr_id  % 1000)
+                corr_vec  = torch.randn(spa.d, device=device)
+                torch.manual_seed(wrong_id % 1000)
+                wrong_vec = torch.randn(spa.d, device=device)
+
+            # Build concepts — pronoun gets Pluto-class eccentricity automatically
+            pron_c  = OrbitalConcept(pron_vec,  "SUBJ", dep_depth=1, pos_confidence=0.15,
+                                     device=device, token_text=pron_word)
+            corr_c  = OrbitalConcept(corr_vec,  "SUBJ", dep_depth=0, pos_confidence=0.90,
+                                     device=device, token_text=corr_word)
+            wrong_c = OrbitalConcept(wrong_vec, "SUBJ", dep_depth=0, pos_confidence=0.90,
+                                     device=device, token_text=wrong_word)
+
+            s_pos = spa.gravitational_score(pron_c, corr_c)    # pull toward correct
+            s_neg = spa.gravitational_score(pron_c, wrong_c)   # pull toward wrong
+
+            loss = torch.clamp(margin - s_pos + s_neg, min=0.0)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            if loss.item() > 1e-9:
+                n_active += 1
+
+        avg = total_loss / max(len(pairs), 1)
+        print(f"    Epoch {epoch+1:2d}/{epochs}  loss={avg:.5f}  active={n_active}/{len(pairs)}")
+
+
+# ── __main__: standalone training + pronoun rerun ─────────────────────────────
+
+if __name__ == "__main__":
+    import sys, os, random
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {DEVICE}")
+    if DEVICE.type == "cuda":
+        print(f"GPU   : {torch.cuda.get_device_name(0)}")
+
+    # ── Vocabulary ────────────────────────────────────────────────────────────
+    from benchmarks.structured_qa import rebuild_direct_vocab
+    print("\n[1] Building vocabulary...")
+    word2id = rebuild_direct_vocab(max_vocab=5000)
+    print(f"    Vocab size: {len(word2id)}")
+
+    # ── GloVe ─────────────────────────────────────────────────────────────────
+    from solar_ring.glove_loader import load_glove
+    GLOVE_PATH = "data/glove.6B.300d.txt"
+    glove = None
+    if os.path.exists(GLOVE_PATH):
+        print(f"\n[2] Loading GloVe from {GLOVE_PATH}...")
+        glove = load_glove(GLOVE_PATH, word2id, d=300)
+        print(f"    Shape: {glove.shape}")
+    else:
+        print(f"\n[2] GloVe not found — using random vectors for training")
+
+    # ── Build training pairs ──────────────────────────────────────────────────
+    print("\n[3] Building training pairs...")
+
+    # Pronoun pairs from Winograd schemas
+    from benchmarks.winograd_full import WINOGRAD_SCHEMAS
+    wino_pairs = []
+    for ctx, correct, wrong in WINOGRAD_SCHEMAS:
+        # Infer pronoun from context (simplify: use "it"/"he"/"she" if present)
+        ctx_lower = ctx.lower()
+        if " she " in ctx_lower or ctx_lower.endswith(" she"):
+            pron = "she"
+        elif " he " in ctx_lower or ctx_lower.endswith(" he"):
+            pron = "he"
+        else:
+            pron = "it"
+        # correct/wrong are full phrases; extract first token as the key word
+        c_word = correct.split()[0] if correct.split() else correct
+        w_word = wrong.split()[0]   if wrong.split()   else wrong
+        wino_pairs.append((pron, c_word, w_word))
+
+    # Nested pronoun pairs from nested_pronoun_100
+    from benchmarks.nested_pronoun_100 import GROUP1, GROUP2, GROUP3, GROUP4
+    nested_pairs = []
+    for grp in (GROUP1, GROUP2, GROUP3, GROUP4):
+        for item in grp:
+            sentence, pron, correct, wrong, depth = item
+            nested_pairs.append((pron, correct, wrong))
+
+    all_pairs = wino_pairs + nested_pairs
+    print(f"    Winograd pairs : {len(wino_pairs)}")
+    print(f"    Nested pairs   : {len(nested_pairs)}")
+    print(f"    Total          : {len(all_pairs)}")
+
+    # ── Instantiate and train ─────────────────────────────────────────────────
+    print("\n[4] Training SolarPhysicsAttention (G_matrix + resonance)...")
+    spa = SolarPhysicsAttention(d_model=D_MODEL).to(DEVICE)
+    train_physics(spa, all_pairs, glove, word2id, device=DEVICE, epochs=10, lr=1e-3, margin=0.3)
+
+    # ── Rerun pronoun benchmark ───────────────────────────────────────────────
+    print("\n[5] Rerunning pronoun benchmark after physics training...")
+    import subprocess, sys as _sys
+    result = subprocess.run(
+        [_sys.executable, "benchmarks/winograd_full.py"],
+        capture_output=False,
+    )
+    print(f"\n    Pronoun benchmark exit code: {result.returncode}")

@@ -29,6 +29,24 @@ import torch.nn.functional as F
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+
+# ── Question type parser ──────────────────────────────────────────────────────
+
+def parse_question_type(question: str) -> str:
+    q = question.lower()
+    if any(w in q for w in ['who gave', 'who told', 'who sent',
+                              'who helped', 'who hired', 'who warned',
+                              'who claimed', 'who said']):
+        return 'SUBJ'
+    if any(w in q for w in ['who received', 'who got', 'who was hired',
+                              'who was helped', 'who heard']):
+        return 'OBJ'
+    if any(w in q for w in ['what did', 'what happened', 'what action']):
+        return 'VERB'
+    if 'who won' in q or 'who fixed' in q or 'who bought' in q:
+        return 'SUBJ_NESTED'
+    return 'SUBJ'
+
 # ── Device ────────────────────────────────────────────────────────────────────
 print(f"Torch : {torch.__version__}")
 print(f"CUDA  : {torch.cuda.is_available()}")
@@ -246,6 +264,65 @@ def solar_predict(
     return sc > sw
 
 
+def solar_predict_slot(
+    solar: "SolarClassifier",
+    ctx_ids: torch.Tensor,
+    corr_id: int,
+    wrong_id: int,
+    question: str,
+    depth: int,
+    glove,
+) -> bool:
+    """
+    Solar Ring direct slot extraction with GloVe cosine comparison.
+
+    Picks the ring by depth (0=sun, 1=first planet, 2=moon), then reads
+    the slot (SUBJ/OBJ/VERB) determined by parse_question_type(question).
+    Falls back to classifier scoring when GloVe is unavailable or the slot
+    vector is zero (slot never written by the model).
+    """
+    if glove is None:
+        return solar_predict(solar, ctx_ids, corr_id, wrong_id, depth)
+
+    slot_type = parse_question_type(question)
+
+    with torch.no_grad():
+        memory = solar.base.get_memory_for_sentence(ctx_ids)
+
+    # Select ring by syntactic depth; depth-3 pronoun questions resolve back
+    # to the sun (the pronoun "he/she" refers to the main-clause subject).
+    n_rings = len(memory.rings)
+    if depth == 0 or depth == 3:
+        ring = memory.rings[0]
+    elif depth == 1:
+        ring = memory.rings[1] if n_rings > 1 else memory.rings[0]
+    else:  # depth >= 2
+        ring = memory.rings[min(depth, n_rings - 1)]
+
+    if slot_type == 'OBJ':
+        extracted = ring.object_vector()
+    elif slot_type == 'VERB':
+        extracted = ring.verb_vector()
+    elif slot_type == 'SUBJ_NESTED':
+        child_ring = memory.rings[1] if n_rings > 1 else memory.rings[0]
+        extracted = child_ring.subject_vector()
+    else:  # SUBJ (default)
+        extracted = ring.subject_vector()
+
+    ext_f = extracted.float()
+    # Fall back to classifier if the slot was never written
+    if ext_f.norm() < 1e-6:
+        return solar_predict(solar, ctx_ids, corr_id, wrong_id, depth)
+
+    correct_emb = torch.tensor(glove[corr_id], dtype=torch.float32, device=DEVICE)
+    wrong_emb   = torch.tensor(glove[wrong_id], dtype=torch.float32, device=DEVICE)
+
+    sim_correct = F.cosine_similarity(ext_f.unsqueeze(0), correct_emb.unsqueeze(0)).item()
+    sim_wrong   = F.cosine_similarity(ext_f.unsqueeze(0), wrong_emb.unsqueeze(0)).item()
+
+    return sim_correct > sim_wrong
+
+
 def bilstm_predict(
     bilstm: "BiLSTMClassifier",
     ctx_ids: torch.Tensor,
@@ -333,7 +410,7 @@ def main():
         wrong_id = word2id.get(_normalize(wrong),   0)
 
         depth_results[depth]["solar"].append(
-            solar_predict(solar_model, ctx_ids, corr_id, wrong_id, depth, slot)
+            solar_predict_slot(solar_model, ctx_ids, corr_id, wrong_id, q, depth, glove)
         )
         depth_results[depth]["bilstm"].append(
             bilstm_predict(bilstm_model, ctx_ids, corr_id, wrong_id)
