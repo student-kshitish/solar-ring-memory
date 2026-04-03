@@ -146,14 +146,14 @@ class SolarRingLayer(nn.Module):
                 dep = ring.depth if ring.depth is not None else 0
                 pos = "SUBJ" if ring.subj_locked else ("OBJ" if ring.obj_locked else "VERB")
                 conf = 0.9 if (ring.subj_locked or ring.obj_locked) else 0.5
-                ring_concepts.append(OrbitalConcept(sv, pos, dep, conf, sv.device))
+                ring_concepts.append(OrbitalConcept(sv, pos, dep, conf, sv.device, token_text=""))
                 ring_vecs_list.append(sv)
 
             # Current-token concept
             cur_pos  = _ROLE_TO_POS.get(int(effective_role), "DET")
             cur_dep  = memory.active_ring.depth if memory.active_ring.depth is not None else 0
             cur_conf = float(spawn_prob.detach().item())
-            x_concept = OrbitalConcept(x.float(), cur_pos, cur_dep, cur_conf, x.device)
+            x_concept = OrbitalConcept(x.float(), cur_pos, cur_dep, cur_conf, x.device, token_text="")
 
             # Assemble: rings first, current token last
             all_concepts = ring_concepts + [x_concept]

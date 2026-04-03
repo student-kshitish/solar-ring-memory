@@ -352,7 +352,7 @@ def run_solar_physics_demo(word2id: Dict[str, int], glove):
             torch.manual_seed(w_id % 1000 + dep_depth * 31)
             vec = torch.randn(D_MODEL, device=DEVICE, dtype=torch.float32)
             vec = vec / (vec.norm() + 1e-8) * 3.0
-        c = OrbitalConcept(vec, pos_type, dep_depth, conf, DEVICE)
+        c = OrbitalConcept(vec, pos_type, dep_depth, conf, DEVICE, token_text=word)
         concepts.append(c)
         vecs_list.append(vec)
 
@@ -366,7 +366,7 @@ def run_solar_physics_demo(word2id: Dict[str, int], glove):
     print(header)
     print("-" * len(header))
     for (word, pos_type, dep_depth, conf), c in zip(tokens_info, concepts):
-        cls = orbit_class(c.pos_type, c.eccentricity)
+        cls = c.orbit_class if c.orbit_class else orbit_class(c.pos_type, c.eccentricity)
         print(
             f"{word:<10} {pos_type:<6} {c.mass:>6.2f} {c.radius:>8.1f} "
             f"{c.eccentricity:>13.2f} {cls:<10}"

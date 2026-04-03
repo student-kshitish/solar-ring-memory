@@ -22,6 +22,12 @@ import torch.nn.functional as F
 
 from solar_ring.config import D_MODEL
 
+# Pronoun set — any token whose text appears here gets eccentricity=0.85 (Pluto-class)
+PRONOUNS = {
+    'it', 'he', 'she', 'they', 'him', 'her', 'them',
+    'his', 'hers', 'its', 'their', 'who', 'which', 'that',
+}
+
 
 # ── Orbit class classifier (for display) ─────────────────────────────────────
 
@@ -71,12 +77,20 @@ class OrbitalConcept:
         dep_depth:      int,
         pos_confidence: float,
         device,
+        token_text:     str = "",
     ):
-        self.vec          = token_vec.float().to(device)
-        self.pos_type     = pos_type
-        self.mass         = float(token_vec.float().norm().item())
-        self.radius       = 3.0 ** dep_depth
-        self.eccentricity = 1.0 - float(pos_confidence)
+        self.vec      = token_vec.float().to(device)
+        self.pos_type = pos_type
+        self.mass     = float(token_vec.float().norm().item())
+        self.radius   = 3.0 ** dep_depth
+
+        # Pronouns are always Pluto-class (high eccentricity → unstable orbit)
+        if token_text.lower() in PRONOUNS:
+            self.eccentricity = 0.85
+            self.orbit_class  = "Pluto"
+        else:
+            self.eccentricity = 1.0 - float(pos_confidence)
+            self.orbit_class  = None  # determined by orbit_class() fn
 
         self.angle_vec = torch.zeros(8, device=device, dtype=torch.float32)
         idx = self._POS_TO_IDX.get(pos_type)
