@@ -36,7 +36,10 @@ class RingNode:
 
         # Write-once locks for subject and object
         self.subj_locked = False
-        self.obj_locked = False
+        self.obj_locked  = False
+        # Text label of word written to subject/object slot (knowledge injection)
+        self.subj_word: str = ""
+        self.obj_word:  str = ""
 
         # Circular buffer head pointer for rotating slots (0..4)
         self.rot_head = 0

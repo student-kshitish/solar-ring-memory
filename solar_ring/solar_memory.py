@@ -69,7 +69,8 @@ class SolarMemory:
 
     def process_token(self, vec: torch.Tensor, role_id: int,
                       verb_gate: torch.Tensor = None,
-                      spawn: bool = False) -> int:
+                      spawn: bool = False,
+                      token_text: str = "") -> int:
         """
         Route vec into the active ring based on role_id.
         If spawn=True, create a child ring and switch to it first.
@@ -84,8 +85,12 @@ class SolarMemory:
 
         if role_id == ROLE_SUBJ:
             ring.write_subject(vec, hard_lock=self.hard_lock)
+            if token_text:
+                ring.subj_word = token_text
         elif role_id == ROLE_OBJ:
             ring.write_object(vec, hard_lock=self.hard_lock)
+            if token_text:
+                ring.obj_word = token_text
         elif role_id == ROLE_VERB:
             gate = verb_gate if verb_gate is not None else torch.tensor(0.5, dtype=self.dtype, device=self.device)
             ring.write_verb(vec, gate)
