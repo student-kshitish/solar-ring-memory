@@ -46,8 +46,8 @@ def val_accuracy(model, test_pairs, cache):
         for i in range(0, len(test_pairs) - 1, 2):
             text_c, label_c = test_pairs[i]
             text_w, label_w = test_pairs[i + 1]
-            _, _, logit_c = model.forward_from_emb(cache[text_c])
-            _, _, logit_w = model.forward_from_emb(cache[text_w])
+            _, _, logit_c = model.forward_from_emb(cache[text_c].clone())
+            _, _, logit_w = model.forward_from_emb(cache[text_w].clone())
             if logit_c.item() > logit_w.item():
                 correct += 1
             count += 1
@@ -100,8 +100,8 @@ def train_contextual(epochs=20):
         for i in range(0, len(train_pairs) - 1, 2):
             text_c, label_c = train_pairs[i]
             text_w, label_w = train_pairs[i + 1]
-            emb_c = train_cache[text_c]   # (L, 384) — pure tensor lookup
-            emb_w = train_cache[text_w]
+            emb_c = train_cache[text_c].clone()   # clone: inference→normal tensor for autograd
+            emb_w = train_cache[text_w].clone()
 
             optimizer.zero_grad()
 
@@ -178,8 +178,8 @@ def evaluate_contextual(model):
     total   = len(WINOGRAD_SCHEMAS)
     with torch.no_grad():
         for ctx, corr, wrong in WINOGRAD_SCHEMAS:
-            emb_c = wcache[ctx + " " + corr]
-            emb_w = wcache[ctx + " " + wrong]
+            emb_c = wcache[ctx + " " + corr].clone()
+            emb_w = wcache[ctx + " " + wrong].clone()
             _, _, logit_c = model.forward_from_emb(emb_c)
             _, _, logit_w = model.forward_from_emb(emb_w)
             if logit_c.item() > logit_w.item():
@@ -205,8 +205,8 @@ def evaluate_pronoun_direct(model):
         for i in range(0, len(test_items) - 1, 2):
             text_c, _ = test_items[i]
             text_w, _ = test_items[i + 1]
-            emb_c = tcache[text_c]
-            emb_w = tcache[text_w]
+            emb_c = tcache[text_c].clone()
+            emb_w = tcache[text_w].clone()
             _, _, logit_c = model.forward_from_emb(emb_c)
             _, _, logit_w = model.forward_from_emb(emb_w)
             if logit_c.item() > logit_w.item():
