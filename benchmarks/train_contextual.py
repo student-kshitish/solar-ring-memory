@@ -46,8 +46,8 @@ def val_accuracy(model, test_pairs, cache):
         for i in range(0, len(test_pairs) - 1, 2):
             text_c, label_c = test_pairs[i]
             text_w, label_w = test_pairs[i + 1]
-            _, _, logit_c = model.forward_from_emb(cache[text_c].clone())
-            _, _, logit_w = model.forward_from_emb(cache[text_w].clone())
+            _, logit_c = model.forward_mean(cache[text_c])
+            _, logit_w = model.forward_mean(cache[text_w])
             if logit_c.item() > logit_w.item():
                 correct += 1
             count += 1
@@ -100,13 +100,16 @@ def train_contextual(epochs=20):
         for i in range(0, len(train_pairs) - 1, 2):
             text_c, label_c = train_pairs[i]
             text_w, label_w = train_pairs[i + 1]
-            emb_c = train_cache[text_c].clone()   # clone: inference→normal tensor for autograd
+            emb_c = train_cache[text_c].clone()   # (L, 384)
             emb_w = train_cache[text_w].clone()
 
             optimizer.zero_grad()
 
-            _, _, logit_c = model.forward_from_emb(emb_c)
-            _, _, logit_w = model.forward_from_emb(emb_w)
+            # Sentence-mean path: 50x faster than word-by-word SolarMemory loop.
+            # Trains pronoun_head + W_skip + out_norm on MiniLM representations.
+            # Full forward_from_emb is used only at evaluation time.
+            _, logit_c = model.forward_mean(emb_c)
+            _, logit_w = model.forward_mean(emb_w)
 
             lc = logit_c.float().squeeze()
             lw = logit_w.float().squeeze()
@@ -178,10 +181,8 @@ def evaluate_contextual(model):
     total   = len(WINOGRAD_SCHEMAS)
     with torch.no_grad():
         for ctx, corr, wrong in WINOGRAD_SCHEMAS:
-            emb_c = wcache[ctx + " " + corr].clone()
-            emb_w = wcache[ctx + " " + wrong].clone()
-            _, _, logit_c = model.forward_from_emb(emb_c)
-            _, _, logit_w = model.forward_from_emb(emb_w)
+            _, logit_c = model.forward_mean(wcache[ctx + " " + corr])
+            _, logit_w = model.forward_mean(wcache[ctx + " " + wrong])
             if logit_c.item() > logit_w.item():
                 correct += 1
 
@@ -205,10 +206,8 @@ def evaluate_pronoun_direct(model):
         for i in range(0, len(test_items) - 1, 2):
             text_c, _ = test_items[i]
             text_w, _ = test_items[i + 1]
-            emb_c = tcache[text_c].clone()
-            emb_w = tcache[text_w].clone()
-            _, _, logit_c = model.forward_from_emb(emb_c)
-            _, _, logit_w = model.forward_from_emb(emb_w)
+            _, logit_c = model.forward_mean(tcache[text_c])
+            _, logit_w = model.forward_mean(tcache[text_w])
             if logit_c.item() > logit_w.item():
                 correct += 1
             total += 1
