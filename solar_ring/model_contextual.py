@@ -21,6 +21,11 @@ class SolarRingContextual(nn.Module):
         self.W_out = nn.Linear(flat_dim, 384)
         self.out_norm = nn.LayerNorm(384)
         self.pronoun_head = nn.Linear(384, 1)
+        self.small_head = nn.Sequential(   # ~25K params
+            nn.Linear(384, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+        )
         self.to(device)
 
     def forward(self, sentence: str, memory=None):
@@ -75,7 +80,7 @@ class SolarRingContextual(nn.Module):
         flat = flat[:flat_dim].float()
         c = self.W_out(flat)
         c = self.out_norm(c + self.W_skip(x0))
-        logit = self.pronoun_head(c)
+        logit = self.small_head(c)
         return c, memory, logit
 
     def freeze_ring_layers(self):
@@ -86,6 +91,13 @@ class SolarRingContextual(nn.Module):
             param.requires_grad = False
         for param in self.W_skip.parameters():
             param.requires_grad = False
+
+    def freeze_for_probe(self):
+        """Freeze everything except small_head (~25K params)."""
+        for param in self.parameters():
+            param.requires_grad = False
+        for param in self.small_head.parameters():
+            param.requires_grad = True
 
     def forward_mean(self, word_embeddings: torch.Tensor):
         """

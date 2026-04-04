@@ -54,16 +54,16 @@ def val_accuracy(model, test_pairs, cache):
     return correct / max(count, 1) * 100
 
 
-def train_contextual(epochs=20):
+def train_contextual(epochs=30):
     print("="*62)
     print("Training SolarRingContextual — 1600 pairs, 20 epochs")
     print("="*62)
     t0 = time.time()
 
     model = SolarRingContextual(device=DEVICE).to(DEVICE)
-    model.freeze_ring_layers()
+    model.freeze_for_probe()
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Trainable params after freeze: {n_params:,}  ({n_params/1e6:.2f}M)\n")
+    print(f"Trainable params (probe only): {n_params:,}\n")
 
     all_pairs   = build_generated_pairs()          # 1600 flat (text, label)
     train_pairs = all_pairs[:1200]                 # 75% train
@@ -83,12 +83,14 @@ def train_contextual(epochs=20):
         [p for p in model.parameters() if p.requires_grad],
         lr=1e-3, weight_decay=0.01
     )
-    scheduler = StepLR(optimizer, step_size=7, gamma=0.3)
+    scheduler = StepLR(optimizer, step_size=10, gamma=0.3)
     loss_fn   = nn.BCEWithLogitsLoss()
 
-    best_val_acc  = 0.0
-    best_epoch    = 0
-    debug_batches = 3   # print detailed trace for first N pairs of epoch 1
+    best_val_acc    = 0.0
+    best_epoch      = 0
+    patience        = 8    # early stopping: stop after 8 epochs with no val improvement
+    no_improve      = 0
+    debug_batches   = 3
 
     print(f"{'Epoch':>5}  {'Train Loss':>10}  {'Train Acc':>9}  "
           f"{'Val Acc':>7}  {'Time':>6}")
@@ -157,8 +159,15 @@ def train_contextual(epochs=20):
         if v_acc > best_val_acc:
             best_val_acc = v_acc
             best_epoch   = epoch + 1
+            no_improve   = 0
             torch.save(model.state_dict(),
                        'checkpoints/solar_contextual_best.pt')
+        else:
+            no_improve += 1
+            if no_improve >= patience:
+                print(f"  Early stop at epoch {epoch+1} "
+                      f"(no val improvement for {patience} epochs)")
+                break
 
     print(f"\nBest val acc: {best_val_acc:.1f}% at epoch {best_epoch}  "
           f"Total time: {time.time()-t0:.1f}s")
@@ -222,7 +231,7 @@ def evaluate_pronoun_direct(model):
 
 
 if __name__ == "__main__":
-    model = train_contextual(epochs=20)
+    model = train_contextual(epochs=30)
 
     print("\n" + "="*62)
     print("Evaluation (best checkpoint)")
