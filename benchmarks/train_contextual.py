@@ -46,14 +46,11 @@ def val_accuracy(model, test_pairs, cache):
         for i in range(0, len(test_pairs) - 1, 2):
             text_c, label_c = test_pairs[i]
             text_w, label_w = test_pairs[i + 1]
-            try:
-                _, _, logit_c = model.forward_from_emb(cache[text_c])
-                _, _, logit_w = model.forward_from_emb(cache[text_w])
-                if logit_c.item() > logit_w.item():
-                    correct += 1
-                count += 1
-            except Exception:
-                continue
+            _, _, logit_c = model.forward_from_emb(cache[text_c])
+            _, _, logit_w = model.forward_from_emb(cache[text_w])
+            if logit_c.item() > logit_w.item():
+                correct += 1
+            count += 1
     return correct / max(count, 1) * 100
 
 
@@ -87,6 +84,7 @@ def train_contextual(epochs=20):
 
     best_val_acc  = 0.0
     best_epoch    = 0
+    debug_batches = 3   # print detailed trace for first N pairs of epoch 1
 
     print(f"{'Epoch':>5}  {'Train Loss':>10}  {'Train Acc':>9}  "
           f"{'Val Acc':>7}  {'Time':>6}")
@@ -97,6 +95,7 @@ def train_contextual(epochs=20):
         total_loss = 0.0
         correct    = 0
         count      = 0
+        debug      = (epoch == 0)
 
         for i in range(0, len(train_pairs) - 1, 2):
             text_c, label_c = train_pairs[i]
@@ -105,24 +104,38 @@ def train_contextual(epochs=20):
             emb_w = train_cache[text_w]
 
             optimizer.zero_grad()
-            try:
-                _, _, logit_c = model.forward_from_emb(emb_c)
-                _, _, logit_w = model.forward_from_emb(emb_w)
-                target_c = torch.tensor([float(label_c)], device=DEVICE, dtype=torch.float32)
-                target_w = torch.tensor([float(label_w)], device=DEVICE, dtype=torch.float32)
-                loss = (
-                    loss_fn(logit_c.float(), target_c) +
-                    loss_fn(logit_w.float(), target_w)
+
+            _, _, logit_c = model.forward_from_emb(emb_c)
+            _, _, logit_w = model.forward_from_emb(emb_w)
+
+            lc = logit_c.float().squeeze()
+            lw = logit_w.float().squeeze()
+
+            # Margin loss: push correct logit above wrong by margin 1
+            loss = torch.clamp(1.0 - lc + lw, min=0.0)
+
+            if debug and count < debug_batches:
+                gfn = loss.grad_fn.__class__.__name__ if loss.grad_fn else "NONE"
+                print(f"  [debug pair {count}] "
+                      f"logit_c={lc.item():.4f}  logit_w={lw.item():.4f}  "
+                      f"loss={loss.item():.4f}  grad_fn={gfn}")
+
+            loss.backward()
+
+            if debug and count < debug_batches:
+                gnorm = sum(
+                    p.grad.abs().sum().item()
+                    for p in model.parameters() if p.grad is not None
                 )
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
-                total_loss += loss.item()
-                if logit_c.item() > logit_w.item():
-                    correct += 1
-                count += 1
-            except Exception:
-                continue
+                print(f"             grad_norm={gnorm:.4f}")
+
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+
+            total_loss += loss.item()
+            if lc.item() > lw.item():
+                correct += 1
+            count += 1
 
         scheduler.step()
 
@@ -165,15 +178,12 @@ def evaluate_contextual(model):
     total   = len(WINOGRAD_SCHEMAS)
     with torch.no_grad():
         for ctx, corr, wrong in WINOGRAD_SCHEMAS:
-            try:
-                emb_c = wcache[ctx + " " + corr]
-                emb_w = wcache[ctx + " " + wrong]
-                _, _, logit_c = model.forward_from_emb(emb_c)
-                _, _, logit_w = model.forward_from_emb(emb_w)
-                if logit_c.item() > logit_w.item():
-                    correct += 1
-            except Exception:
-                continue
+            emb_c = wcache[ctx + " " + corr]
+            emb_w = wcache[ctx + " " + wrong]
+            _, _, logit_c = model.forward_from_emb(emb_c)
+            _, _, logit_w = model.forward_from_emb(emb_w)
+            if logit_c.item() > logit_w.item():
+                correct += 1
 
     acc = correct / total * 100
     print(f"Solar Ring+MiniLM Winograd: {correct}/{total} = {acc:.1f}%")
@@ -195,16 +205,13 @@ def evaluate_pronoun_direct(model):
         for i in range(0, len(test_items) - 1, 2):
             text_c, _ = test_items[i]
             text_w, _ = test_items[i + 1]
-            try:
-                emb_c = tcache[text_c]
-                emb_w = tcache[text_w]
-                _, _, logit_c = model.forward_from_emb(emb_c)
-                _, _, logit_w = model.forward_from_emb(emb_w)
-                if logit_c.item() > logit_w.item():
-                    correct += 1
-                total += 1
-            except Exception:
-                continue
+            emb_c = tcache[text_c]
+            emb_w = tcache[text_w]
+            _, _, logit_c = model.forward_from_emb(emb_c)
+            _, _, logit_w = model.forward_from_emb(emb_w)
+            if logit_c.item() > logit_w.item():
+                correct += 1
+            total += 1
 
     acc = correct / max(total, 1) * 100
     print(f"Solar Ring+MiniLM pronoun: {correct}/{total} = {acc:.1f}%")
