@@ -78,6 +78,15 @@ class SolarRingContextual(nn.Module):
         logit = self.pronoun_head(c)
         return c, memory, logit
 
+    def freeze_ring_layers(self):
+        """Freeze all layers except output heads (W_out, out_norm, pronoun_head)."""
+        for param in self.layers.parameters():
+            param.requires_grad = False
+        for param in self.input_proj.parameters():
+            param.requires_grad = False
+        for param in self.W_skip.parameters():
+            param.requires_grad = False
+
     def forward_mean(self, word_embeddings: torch.Tensor):
         """
         Simple forward using mean of word embeddings.

@@ -46,8 +46,8 @@ def val_accuracy(model, test_pairs, cache):
         for i in range(0, len(test_pairs) - 1, 2):
             text_c, label_c = test_pairs[i]
             text_w, label_w = test_pairs[i + 1]
-            _, logit_c = model.forward_mean(cache[text_c])
-            _, logit_w = model.forward_mean(cache[text_w])
+            _, _, logit_c = model.forward_from_emb(cache[text_c].clone())
+            _, _, logit_w = model.forward_from_emb(cache[text_w].clone())
             if logit_c.item() > logit_w.item():
                 correct += 1
             count += 1
@@ -61,8 +61,9 @@ def train_contextual(epochs=20):
     t0 = time.time()
 
     model = SolarRingContextual(device=DEVICE).to(DEVICE)
-    n_params = model.count_parameters()
-    print(f"Trainable params: {n_params:,}  ({n_params/1e6:.1f}M)\n")
+    model.freeze_ring_layers()
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Trainable params after freeze: {n_params:,}  ({n_params/1e6:.2f}M)\n")
 
     all_pairs   = build_generated_pairs()          # 1600 flat (text, label)
     train_pairs = all_pairs[:1200]                 # 75% train
@@ -78,7 +79,10 @@ def train_contextual(epochs=20):
     test_cache  = cache_word_embeddings(model.embedder, test_texts,  DEVICE, "test")
 
     # ── Optimiser & scheduler ────────────────────────────────────────────────
-    optimizer = AdamW(model.parameters(), lr=3e-4, weight_decay=0.01)
+    optimizer = AdamW(
+        [p for p in model.parameters() if p.requires_grad],
+        lr=1e-3, weight_decay=0.01
+    )
     scheduler = StepLR(optimizer, step_size=7, gamma=0.3)
     loss_fn   = nn.BCEWithLogitsLoss()
 
@@ -108,8 +112,8 @@ def train_contextual(epochs=20):
             # Sentence-mean path: 50x faster than word-by-word SolarMemory loop.
             # Trains pronoun_head + W_skip + out_norm on MiniLM representations.
             # Full forward_from_emb is used only at evaluation time.
-            _, logit_c = model.forward_mean(emb_c)
-            _, logit_w = model.forward_mean(emb_w)
+            _, _, logit_c = model.forward_from_emb(emb_c)
+            _, _, logit_w = model.forward_from_emb(emb_w)
 
             lc = logit_c.float().squeeze()
             lw = logit_w.float().squeeze()
@@ -181,8 +185,8 @@ def evaluate_contextual(model):
     total   = len(WINOGRAD_SCHEMAS)
     with torch.no_grad():
         for ctx, corr, wrong in WINOGRAD_SCHEMAS:
-            _, logit_c = model.forward_mean(wcache[ctx + " " + corr])
-            _, logit_w = model.forward_mean(wcache[ctx + " " + wrong])
+            _, _, logit_c = model.forward_from_emb(wcache[ctx + " " + corr].clone())
+            _, _, logit_w = model.forward_from_emb(wcache[ctx + " " + wrong].clone())
             if logit_c.item() > logit_w.item():
                 correct += 1
 
@@ -206,8 +210,8 @@ def evaluate_pronoun_direct(model):
         for i in range(0, len(test_items) - 1, 2):
             text_c, _ = test_items[i]
             text_w, _ = test_items[i + 1]
-            _, logit_c = model.forward_mean(tcache[text_c])
-            _, logit_w = model.forward_mean(tcache[text_w])
+            _, _, logit_c = model.forward_from_emb(tcache[text_c].clone())
+            _, _, logit_w = model.forward_from_emb(tcache[text_w].clone())
             if logit_c.item() > logit_w.item():
                 correct += 1
             total += 1
