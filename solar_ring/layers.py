@@ -72,6 +72,9 @@ class SolarRingLayer(nn.Module):
         self.W_out_gate = nn.Linear(d, d)
         self.norm = nn.LayerNorm(d)
 
+        # Level 2 — multi-planet broadcast gate (created lazily on first call)
+        self._W_planet_gates = None
+
     # ------------------------------------------------------------------
 
     def forward(
@@ -183,3 +186,41 @@ class SolarRingLayer(nn.Module):
         x_out = self.norm((x + gate_out * x_ctx).float()).to(dtype)
 
         return x_out, role_logits, spawn_logit
+
+    def parallel_planet_broadcast(self, x_t: torch.Tensor, memory) -> torch.Tensor:
+        """
+        Level 2 — multi-planet parallelism.
+
+        Broadcast x_t simultaneously to all planet rings (depth=1).
+        Gate computation is a single batched Linear instead of P sequential
+        calls — theoretical speedup ~P on GPU.
+
+        Returns gate vector (P,) or None if no planets exist.
+        """
+        planet_rings = [r for r in memory.rings if r.depth == 1]
+        if not planet_rings:
+            return None
+
+        P = len(planet_rings)
+        d = x_t.shape[0]
+
+        # Lazy-init the gate projection (P varies; recreate if size changed)
+        if self._W_planet_gates is None or self._W_planet_gates.out_features != P:
+            self._W_planet_gates = nn.Linear(2 * d, P).to(x_t.device)
+
+        # Stack planet subject vectors → mean context
+        planet_heads = torch.stack(
+            [r.subject_vector().float() for r in planet_rings]
+        )                                                 # (P, d)
+        planet_mean  = planet_heads.mean(dim=0)           # (d,)
+        gate_input   = torch.cat([x_t.float(), planet_mean])  # (2d,)
+
+        # One batched gate computation for all P planets
+        gates     = torch.sigmoid(self._W_planet_gates(gate_input))  # (P,)
+        candidate = torch.tanh(x_t)
+
+        for i, ring in enumerate(planet_rings):
+            if gates[i].item() > 0.3:
+                ring.write_rotating(candidate * gates[i])
+
+        return gates
