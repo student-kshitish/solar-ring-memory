@@ -105,8 +105,8 @@ def score_with_sub_planet(sentence: str,
         size_correct += pronoun_sp.size_compatibility(adj, correct_word)
         size_wrong   += pronoun_sp.size_compatibility(adj, wrong_word)
 
-    COMPAT_WEIGHT = 0.35
-    SIZE_WEIGHT   = 0.25
+    COMPAT_WEIGHT = 0.6
+    SIZE_WEIGHT   = 0.8
 
     final_correct = (base_correct
                      + COMPAT_WEIGHT * compat_correct
@@ -114,6 +114,36 @@ def score_with_sub_planet(sentence: str,
     final_wrong   = (base_wrong
                      + COMPAT_WEIGHT * compat_wrong
                      + SIZE_WEIGHT   * size_wrong)
+
+    # ── CLEAR OVERRIDE: fire only when linguistic rule is certain ──────────
+    from solar_ring.sub_planet_enhanced import ANIMACY_SIGNALS
+
+    inanimate_set   = set(ANIMACY_SIGNALS.get('inanimate',   []))
+    human_male_set  = set(ANIMACY_SIGNALS.get('human_male',  []))
+    human_female_set= set(ANIMACY_SIGNALS.get('human_female',[]))
+    animate_set     = set(ANIMACY_SIGNALS.get('animate',     []))
+    all_animate     = human_male_set | human_female_set | animate_set
+
+    # Neuter "it/its/which/that" → must be inanimate
+    if pronoun_sp.case == 'neuter':
+        if correct_word in inanimate_set and wrong_word in all_animate:
+            final_correct += 2.0
+        elif correct_word in all_animate and wrong_word in inanimate_set:
+            final_wrong += 2.0
+
+    # Masculine "he/him" → must be human_male
+    if pronoun_sp.animacy == 'human_male':
+        if correct_word in human_male_set and wrong_word not in human_male_set:
+            final_correct += 2.0
+        elif wrong_word in human_male_set and correct_word not in human_male_set:
+            final_wrong += 2.0
+
+    # Feminine "she/her" → must be human_female
+    if pronoun_sp.animacy == 'human_female':
+        if correct_word in human_female_set and wrong_word not in human_female_set:
+            final_correct += 2.0
+        elif wrong_word in human_female_set and correct_word not in human_female_set:
+            final_wrong += 2.0
 
     return final_correct, final_wrong
 
@@ -161,7 +191,7 @@ def score_with_sun_state(sentence: str,
     res_c = sun.resonance(vec_c)
     res_w = sun.resonance(vec_w)
 
-    RES_WEIGHT = 0.20
+    RES_WEIGHT = 0.8
     return (score_c + RES_WEIGHT * res_c,
             score_w + RES_WEIGHT * res_w)
 
@@ -208,7 +238,7 @@ def score_with_multi_system(sentence: str,
     res_c = mss.get_resonance(vec_c)
     res_w = mss.get_resonance(vec_w)
 
-    GRAVITY_WEIGHT = 0.15
+    GRAVITY_WEIGHT = 0.6
     return (score_c + GRAVITY_WEIGHT * res_c,
             score_w + GRAVITY_WEIGHT * res_w)
 

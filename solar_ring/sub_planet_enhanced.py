@@ -7,11 +7,17 @@ ANIMACY_SIGNALS = {
     'human_male':   ['john', 'paul', 'tom', 'mike', 'bob',
                      'steve', 'chris', 'alex', 'sam', 'he',
                      'him', 'his', 'man', 'boy', 'father',
-                     'son', 'brother', 'husband'],
+                     'son', 'brother', 'husband',
+                     # expanded from Winograd schema names
+                     'dave', 'david', 'george', 'jake', 'mark',
+                     'nick', 'tim'],
     'human_female': ['mary', 'anna', 'lisa', 'sarah', 'beth',
                      'emma', 'diana', 'carol', 'she', 'her',
                      'hers', 'woman', 'girl', 'mother',
-                     'daughter', 'sister', 'wife'],
+                     'daughter', 'sister', 'wife',
+                     # expanded from Winograd schema names
+                     'alice', 'amy', 'joan', 'rachel', 'sara',
+                     'susan'],
     'animate':      ['cat', 'dog', 'bird', 'fish', 'animal',
                      'horse', 'cow', 'mouse', 'rabbit'],
     'inanimate':    ['trophy', 'suitcase', 'ball', 'window',
@@ -98,40 +104,49 @@ class SubPlanetEnhanced:
         Score compatibility of this pronoun with an antecedent.
         Returns 0.0 to 1.0.
         Higher = more likely this pronoun refers to antecedent.
+
+        Conservative scoring: only boost/penalize when the antecedent
+        is definitively categorized. Unknown names stay at 0.5.
         """
         ant = antecedent_text.lower()
         score = 0.5  # neutral base
 
+        human_male_set   = set(ANIMACY_SIGNALS.get('human_male',   []))
+        human_female_set = set(ANIMACY_SIGNALS.get('human_female', []))
+        animate_set      = set(ANIMACY_SIGNALS.get('animate',      []))
+        inanimate_set    = set(ANIMACY_SIGNALS.get('inanimate',    []))
+        all_animate      = human_male_set | human_female_set | animate_set
+
         # Neuter pronoun "it/its/which/that" → must be inanimate
         if self.case == 'neuter':
-            if ant in ANIMACY_SIGNALS.get('inanimate', []):
+            if ant in inanimate_set:
                 score += 0.4
-            for cat in ('human_male', 'human_female', 'animate'):
-                if ant in ANIMACY_SIGNALS.get(cat, []):
-                    score -= 0.4
-                    break
+            elif ant in all_animate:
+                score -= 0.4
+            # unknown → stay at 0.5
 
-        # Nominative he/she/they → must be animate
-        if self.case == 'nominative':
-            for cat in ('human_male', 'human_female', 'animate'):
-                if ant in ANIMACY_SIGNALS.get(cat, []):
-                    score += 0.3
-                    break
-            if ant in ANIMACY_SIGNALS.get('inanimate', []):
+        # Nominative he/she/they → animate agreement
+        elif self.case == 'nominative':
+            if ant in all_animate:
+                score += 0.2
+            elif ant in inanimate_set:
                 score -= 0.3
+            # unknown → stay at 0.5
 
-        # Gender agreement
+        # Gender agreement — only penalize KNOWN wrong-gender matches
         if self.animacy == 'human_male':
-            if ant in ANIMACY_SIGNALS.get('human_male', []):
-                score += 0.3
-            elif ant in ANIMACY_SIGNALS.get('human_female', []):
-                score -= 0.5
+            if ant in human_male_set:
+                score += 0.3   # confirmed match
+            elif ant in human_female_set:
+                score -= 0.5   # confirmed mismatch
+            # ant unknown → no change
 
         if self.animacy == 'human_female':
-            if ant in ANIMACY_SIGNALS.get('human_female', []):
-                score += 0.3
-            elif ant in ANIMACY_SIGNALS.get('human_male', []):
-                score -= 0.5
+            if ant in human_female_set:
+                score += 0.3   # confirmed match
+            elif ant in human_male_set:
+                score -= 0.5   # confirmed mismatch
+            # ant unknown → no change
 
         return max(0.0, min(1.0, score))
 
