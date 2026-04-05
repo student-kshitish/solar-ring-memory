@@ -72,9 +72,19 @@ def evaluate_with_conceptnet(solar, bilstm, vocab, verbose=False):
         results['multi_sys']['total']   += 1
 
         # Phase 4: + ConceptNet knowledge boost
+        # Use full weight when BOTH candidates are known to ConceptNet;
+        # use reduced weight (0.3x) when only one is known, to prevent
+        # false confidence from asymmetric coverage overriding a correct base.
+        from solar_ring.conceptnet import get_properties, _extract_head_noun
         cn_c, cn_w = apply_conceptnet_to_winograd(ctx, corr, wrong)
-        sc4 = sc3 + CONCEPTNET_WEIGHT * cn_c
-        sw4 = sw3 + CONCEPTNET_WEIGHT * cn_w
+        cw_known = bool(get_properties(_extract_head_noun(corr)))
+        ww_known = bool(get_properties(_extract_head_noun(wrong)))
+        if cw_known and ww_known:
+            w = CONCEPTNET_WEIGHT   # both in ConceptNet — fire at full strength
+        else:
+            w = 0.0                 # one or both unknown — skip to avoid asymmetric harm
+        sc4 = sc3 + w * cn_c
+        sw4 = sw3 + w * cn_w
         results['conceptnet']['correct'] += int(sc4 > sw4)
         results['conceptnet']['total']   += 1
 
