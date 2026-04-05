@@ -7,6 +7,7 @@ from .config import (
     ROLE_SUBJ, ROLE_OBJ, ROLE_VERB, ROLE_CONJ
 )
 from .ring_node import RingNode
+from .sun_state import SunState
 
 
 class SolarMemory:
@@ -34,6 +35,9 @@ class SolarMemory:
         sun.depth = 0
         self.rings = [sun]
         self.alpha = 0  # active ring pointer
+
+        # Global document-level memory — persists across clauses/sentences
+        self.sun_state = SunState(D_MODEL, alpha=0.3, device=device)
 
     # ------------------------------------------------------------------
     # Ring management
@@ -169,11 +173,36 @@ class SolarMemory:
     # Utility
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Sun State integration
+    # ------------------------------------------------------------------
+
+    def end_clause(self):
+        """
+        Call at end of each sentence/clause.
+        Fuses active planet heads into the global Sun State.
+        """
+        planet_heads = []
+        for ring in self.rings:
+            sv = ring.summary_vector()
+            if sv.norm() > 0:
+                planet_heads.append(sv)
+        self.sun_state.fuse(planet_heads)
+
+    def get_sun_resonance(self, token_vec: torch.Tensor) -> float:
+        """How strongly does token_vec resonate with accumulated Sun memory?"""
+        return self.sun_state.resonance(token_vec)
+
+    # ------------------------------------------------------------------
+    # Reset
+    # ------------------------------------------------------------------
+
     def reset(self):
         sun = RingNode(device=self.device, dtype=self.dtype, ring_id=0, parent_id=None)
         sun.depth = 0
         self.rings = [sun]
         self.alpha = 0
+        self.sun_state = SunState(D_MODEL, alpha=0.3, device=self.device)
 
     def __len__(self):
         return len(self.rings)
