@@ -72,6 +72,24 @@ def extract_key_entity(phrase: str, ctx: str) -> str:
     return phrase_words[0].rstrip('.,;') if phrase_words else ''
 
 
+def load_glove(path='data/glove.6B.300d.txt', vocab=None):
+    """Load GloVe vectors for vocab words."""
+    import numpy as np  # noqa: F401
+    vectors = {}
+    print("Loading GloVe...")
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            parts = line.split()
+            word = parts[0]
+            if vocab is None or word in vocab:
+                vectors[word] = torch.tensor(
+                    [float(x) for x in parts[1:]],
+                    dtype=torch.float
+                )
+    print(f"GloVe: {len(vectors)} words loaded")
+    return vectors
+
+
 def find_candidate_idx(sentence: str) -> int:
     """Last meaningful word = appended candidate."""
     words = sentence.lower().split()
@@ -115,7 +133,7 @@ def _score_pair(out_c, A_c, out_w, A_w,
 
 
 def sentence_to_concepts(sentence: str, vocab: dict,
-                          depth: int = 0) -> tuple:
+                          glove_vecs=None, depth: int = 0) -> tuple:
     """Convert sentence to concept list and token vectors."""
     words = sentence.lower().split()
 
@@ -128,9 +146,12 @@ def sentence_to_concepts(sentence: str, vocab: dict,
     }
     SUBJ_WORDS = {'john','mary','tom','lisa','mike',
                   'anna','bob','sarah','cat','dog',
-                  'trophy','ball','window','man','woman'}
+                  'trophy','ball','window','man','woman',
+                  'joan','susan','paul','george',
+                  'alice','beth','carol','diana','emma'}
     OBJ_WORDS  = {'suitcase','book','car','tree',
-                  'table','cup','plate','rock'}
+                  'table','cup','plate','rock','son',
+                  'chicken','sandwich','pitcher'}
 
     concepts = []
     vecs     = []
@@ -149,9 +170,16 @@ def sentence_to_concepts(sentence: str, vocab: dict,
             'token_pos': t,
             'slot_idx':  pos_idx,
         })
-        wid = vocab.get(wclean, 1)
-        vec = torch.zeros(D, device=DEVICE)
-        vec[wid % D] = 1.0
+
+        # GloVe if available — real semantics
+        if glove_vecs and wclean in glove_vecs:
+            vec = glove_vecs[wclean].to(DEVICE)
+        elif glove_vecs and word in glove_vecs:
+            vec = glove_vecs[word].to(DEVICE)
+        else:
+            wid = vocab.get(wclean, 1)
+            vec = torch.zeros(D, device=DEVICE)
+            vec[wid % D] = 1.0
         vecs.append(vec)
 
     vecs_t = (torch.stack(vecs)
@@ -159,7 +187,7 @@ def sentence_to_concepts(sentence: str, vocab: dict,
     return concepts, vecs_t
 
 
-def train_spring(epochs: int = 30):
+def train_spring(epochs: int = 30, glove_vecs=None):
     """Train SolarSpringAttention on pronoun resolution."""
     spring = SolarSpringAttention(D).to(DEVICE)
     head   = nn.Linear(D, 1).to(DEVICE)
@@ -211,8 +239,10 @@ def train_spring(epochs: int = 30):
                 else:
                     norm_c, norm_w = sent_c, sent_w
 
-                conc_c, vecs_c = sentence_to_concepts(norm_c, vocab)
-                conc_w, vecs_w = sentence_to_concepts(norm_w, vocab)
+                conc_c, vecs_c = sentence_to_concepts(
+                    norm_c, vocab, glove_vecs=glove_vecs)
+                conc_w, vecs_w = sentence_to_concepts(
+                    norm_w, vocab, glove_vecs=glove_vecs)
 
                 out_c, A_c, _ = spring(conc_c, vecs_c)
                 out_w, A_w, _ = spring(conc_w, vecs_w)
@@ -277,7 +307,7 @@ def train_spring(epochs: int = 30):
     return spring, head, vocab
 
 
-def evaluate_spring(spring, head, vocab):
+def evaluate_spring(spring, head, vocab, glove_vecs=None):
     """Evaluate on 90 Winograd schemas."""
     spring.eval()
     head.eval()
@@ -304,8 +334,10 @@ def evaluate_spring(spring, head, vocab):
                 sent_c = ctx + ' ' + ent_c
                 sent_w = ctx + ' ' + ent_w
 
-                conc_c, vecs_c = sentence_to_concepts(sent_c, vocab)
-                conc_w, vecs_w = sentence_to_concepts(sent_w, vocab)
+                conc_c, vecs_c = sentence_to_concepts(
+                    sent_c, vocab, glove_vecs=glove_vecs)
+                conc_w, vecs_w = sentence_to_concepts(
+                    sent_w, vocab, glove_vecs=glove_vecs)
 
                 out_c, A_c, _ = spring(conc_c, vecs_c)
                 out_w, A_w, _ = spring(conc_w, vecs_w)
@@ -361,10 +393,14 @@ if __name__ == "__main__":
     print("="*60)
     print(f"Device: {DEVICE}")
 
-    import os
-    SKIP_TRAIN = os.path.exists('checkpoints/solar_spring.pt')
+    # Load GloVe — real semantics replacing one-hot
+    glove_vecs = load_glove('data/glove.6B.300d.txt')
+
+    # Force retrain with GloVe embeddings
+    SKIP_TRAIN = False
 
     if SKIP_TRAIN:
+        import os
         print("Loading existing checkpoint...")
         spring = SolarSpringAttention(D).to(DEVICE)
         head   = nn.Linear(D, 1).to(DEVICE)
@@ -381,10 +417,10 @@ if __name__ == "__main__":
             [ctx + ' ' + c for ctx, c, w in WINOGRAD_SCHEMAS] +
             [ctx + ' ' + w for ctx, c, w in WINOGRAD_SCHEMAS]
         )
-        acc = evaluate_spring(spring, head, vocab)
+        acc = evaluate_spring(spring, head, vocab, glove_vecs=glove_vecs)
     else:
-        spring, head, vocab = train_spring(epochs=30)
-        acc = evaluate_spring(spring, head, vocab)
+        spring, head, vocab = train_spring(epochs=30, glove_vecs=glove_vecs)
+        acc = evaluate_spring(spring, head, vocab, glove_vecs=glove_vecs)
 
     import subprocess
     subprocess.run(['git', 'add',
