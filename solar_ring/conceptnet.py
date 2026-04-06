@@ -44,6 +44,37 @@ CONCEPTNET = {
     'philosopher':{'size': 'medium', 'weight': 'medium', 'fragile': False, 'animate': True},
     'lawyer':     {'size': 'medium', 'weight': 'medium', 'fragile': False, 'animate': True},
     'criminal':   {'size': 'medium', 'weight': 'medium', 'fragile': False, 'animate': True},
+    # Male human names
+    'bob':    {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'chris':  {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'dave':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'david':  {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'george': {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'jake':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'john':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'mark':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'mike':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'nick':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'paul':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'sam':    {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'steve':  {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'tim':    {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    'tom':    {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'male'},
+    # Female human names
+    'alice':  {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'amy':    {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'anna':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'beth':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'carol':  {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'diana':  {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'emma':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'joan':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'lisa':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'mary':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'rachel': {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'sara':   {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'sarah':  {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
+    'susan':  {'animate': True, 'size': 'medium', 'weight': 'medium', 'fragile': False, 'gender': 'female'},
 }
 
 CONTEXT_ADJECTIVES = {
@@ -103,6 +134,19 @@ def conceptnet_score(pronoun_text: str, candidate_text: str,
             score += 0.5
         elif is_animate is True:
             score -= 0.5
+
+    # Rule 1b: gender agreement
+    if pronoun in ('he', 'him', 'his'):
+        if props.get('gender') == 'male':
+            score += 0.4
+        elif props.get('gender') == 'female':
+            score -= 0.6
+
+    if pronoun in ('she', 'her', 'hers'):
+        if props.get('gender') == 'female':
+            score += 0.4
+        elif props.get('gender') == 'male':
+            score -= 0.6
 
     # Rule 2: context adjectives matched against candidate properties
     for word in words_clean:
