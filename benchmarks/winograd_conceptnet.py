@@ -41,6 +41,7 @@ def evaluate_with_conceptnet(solar, bilstm, vocab, verbose=False):
         'multi_sys':  {'correct': 0, 'total': 0},
         'conceptnet': {'correct': 0, 'total': 0},
         'syntactic':  {'correct': 0, 'total': 0},
+        'blackhole':  {'correct': 0, 'total': 0},
         'bilstm':     {'correct': 0, 'total': 0},
     }
 
@@ -104,6 +105,31 @@ def evaluate_with_conceptnet(solar, bilstm, vocab, verbose=False):
         results['syntactic']['correct'] += int(sc5 > sw5)
         results['syntactic']['total']   += 1
 
+        # Phase 6: + Black/White hole confidence
+        from solar_ring.sun_state import SunState
+        from solar_ring.black_white_hole import BlackWhiteHoleManager
+        from solar_ring.solar_memory import SolarMemory
+
+        sun_c    = SunState(300, alpha=0.3, device=DEVICE)
+        memory_c = SolarMemory(device=DEVICE)
+        manager_c = BlackWhiteHoleManager(300, DEVICE, sun_c)
+        for word in (ctx + ' ' + corr).lower().split():
+            manager_c.step(word, memory_c, sun_c)
+        conf_c = manager_c.get_confidence(memory_c.alpha).value
+
+        sun_w    = SunState(300, alpha=0.3, device=DEVICE)
+        memory_w = SolarMemory(device=DEVICE)
+        manager_w = BlackWhiteHoleManager(300, DEVICE, sun_w)
+        for word in (ctx + ' ' + wrong).lower().split():
+            manager_w.step(word, memory_w, sun_w)
+        conf_w = manager_w.get_confidence(memory_w.alpha).value
+
+        BH_WEIGHT = 0.5
+        sc6 = sc4 + BH_WEIGHT * conf_c
+        sw6 = sw4 + BH_WEIGHT * conf_w
+        results['blackhole']['correct'] += int(sc6 > sw6)
+        results['blackhole']['total']   += 1
+
         # BiLSTM baseline
         try:
             bc = get_logit(bilstm, ids_c)
@@ -140,6 +166,7 @@ def print_conceptnet_results(results):
         ('multi_sys',  '+ Multi-solar system'),
         ('conceptnet', '+ ConceptNet knowledge'),
         ('syntactic',  '+ Syntactic position + verb signal'),
+        ('blackhole',  '+ Black/White hole confidence'),
         ('bilstm',     'BiLSTM baseline'),
     ]
 
