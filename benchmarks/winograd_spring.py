@@ -66,14 +66,14 @@ def sentence_to_concepts(sentence: str, vocab: dict,
     return concepts, vecs_t
 
 
-def train_spring(epochs: int = 20):
+def train_spring(epochs: int = 30):
     """Train SolarSpringAttention on pronoun resolution."""
     spring = SolarSpringAttention(D).to(DEVICE)
     head   = nn.Linear(D, 1).to(DEVICE)
 
     optimizer = AdamW(
         list(spring.parameters()) + list(head.parameters()),
-        lr=1e-3, weight_decay=0.01
+        lr=5e-4, weight_decay=0.01
     )
     loss_fn = nn.BCEWithLogitsLoss()
 
@@ -202,7 +202,7 @@ if __name__ == "__main__":
     print("="*60)
     print(f"Device: {DEVICE}")
 
-    spring, head, vocab = train_spring(epochs=20)
+    spring, head, vocab = train_spring(epochs=30)
     acc = evaluate_spring(spring, head, vocab)
 
     import subprocess
