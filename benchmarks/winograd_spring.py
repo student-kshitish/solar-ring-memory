@@ -18,6 +18,17 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 DTYPE  = torch.bfloat16
 D      = 300
 
+PRONOUNS = {'it','he','she','they','him','her',
+            'them','who','which','that','its'}
+
+
+def find_pronoun_idx(sentence: str) -> int:
+    words = sentence.lower().split()
+    for i, w in enumerate(words):
+        if w.rstrip('.,') in PRONOUNS:
+            return i
+    return len(words) - 1  # fallback: last token
+
 
 def sentence_to_concepts(sentence: str, vocab: dict,
                           depth: int = 0) -> tuple:
@@ -73,7 +84,7 @@ def train_spring(epochs: int = 30):
 
     optimizer = AdamW(
         list(spring.parameters()) + list(head.parameters()),
-        lr=5e-4, weight_decay=0.01
+        lr=3e-4, weight_decay=0.01
     )
     loss_fn = nn.BCEWithLogitsLoss()
 
@@ -108,24 +119,53 @@ def train_spring(epochs: int = 30):
         total    = 0
         tot_loss = 0.0
 
-        for text_c, text_w in train_pairs:
+        for sent_c, sent_w in train_pairs:
             optimizer.zero_grad()
             try:
-                conc_c, vecs_c = sentence_to_concepts(text_c, vocab)
-                conc_w, vecs_w = sentence_to_concepts(text_w, vocab)
 
-                out_c, _, _ = spring(conc_c, vecs_c)
-                out_w, _, _ = spring(conc_w, vecs_w)
+                conc_c, vecs_c = sentence_to_concepts(sent_c, vocab)
+                conc_w, vecs_w = sentence_to_concepts(sent_w, vocab)
 
-                logit_c = head(out_c.mean(0))
-                logit_w = head(out_w.mean(0))
+                out_c, A_c, scores_c = spring(conc_c, vecs_c)
+                out_w, A_w, scores_w = spring(conc_w, vecs_w)
+
+                # Find pronoun position in each sentence
+                pronoun_idx_c = find_pronoun_idx(sent_c)
+                pronoun_idx_w = find_pronoun_idx(sent_w)
+
+                # Score pronoun's attention row — not mean pool
+                L_c = len(conc_c)
+                L_w = len(conc_w)
+
+                if pronoun_idx_c < L_c and A_c is not None:
+                    pronoun_vec_c = out_c[pronoun_idx_c]
+                else:
+                    pronoun_vec_c = out_c.mean(0)
+
+                if pronoun_idx_w < L_w and A_w is not None:
+                    pronoun_vec_w = out_w[pronoun_idx_w]
+                else:
+                    pronoun_vec_w = out_w.mean(0)
+
+                logit_c = head(pronoun_vec_c)
+                logit_w = head(pronoun_vec_w)
 
                 t1 = torch.ones(1,  device=DEVICE)
                 t0 = torch.zeros(1, device=DEVICE)
-                loss = (
+
+                # Margin loss — directly push logit_c above logit_w
+                margin_loss = torch.clamp(
+                    1.0 - logit_c.float() + logit_w.float(),
+                    min=0.0
+                ).mean()
+
+                # BCE loss for absolute calibration
+                bce_loss = (
                     loss_fn(logit_c.float().squeeze(), t1.squeeze()) +
                     loss_fn(logit_w.float().squeeze(), t0.squeeze())
                 )
+
+                loss = margin_loss + 0.5 * bce_loss
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
                     list(spring.parameters()) +
@@ -168,18 +208,27 @@ def evaluate_spring(spring, head, vocab):
     with torch.no_grad():
         for ctx, corr, wrong in WINOGRAD_SCHEMAS:
             try:
-                conc_c, vecs_c = sentence_to_concepts(
-                    ctx + ' ' + corr, vocab
-                )
-                conc_w, vecs_w = sentence_to_concepts(
-                    ctx + ' ' + wrong, vocab
-                )
+                sent_c = ctx + ' ' + corr
+                sent_w = ctx + ' ' + wrong
 
-                out_c, _, _ = spring(conc_c, vecs_c)
-                out_w, _, _ = spring(conc_w, vecs_w)
+                conc_c, vecs_c = sentence_to_concepts(sent_c, vocab)
+                conc_w, vecs_w = sentence_to_concepts(sent_w, vocab)
 
-                lc = head(out_c.mean(0)).item()
-                lw = head(out_w.mean(0)).item()
+                out_c, A_c, _ = spring(conc_c, vecs_c)
+                out_w, A_w, _ = spring(conc_w, vecs_w)
+
+                pronoun_idx_c = find_pronoun_idx(sent_c)
+                pronoun_idx_w = find_pronoun_idx(sent_w)
+
+                if pronoun_idx_c < len(conc_c):
+                    lc = head(out_c[pronoun_idx_c]).item()
+                else:
+                    lc = head(out_c.mean(0)).item()
+
+                if pronoun_idx_w < len(conc_w):
+                    lw = head(out_w[pronoun_idx_w]).item()
+                else:
+                    lw = head(out_w.mean(0)).item()
 
                 if lc > lw:
                     correct += 1
