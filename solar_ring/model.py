@@ -170,6 +170,64 @@ class SolarRingModel(nn.Module):
                "context_vec": context_out}
         return logits_out, aux
 
+    def run_with_physics(
+        self,
+        token_ids: torch.Tensor,   # (T,) 1-D sequence
+        words: list,               # list of str, len == T
+        manager,                   # BlackWhiteHoleManager (pre-created by caller)
+        sun_state,                 # SunState (pre-created by caller)
+    ):
+        """
+        Physics-enhanced forward pass.
+        Additive — existing forward() is unchanged.
+
+        Returns:
+            logits:      (T, V) next-token logits
+            context_vec: (d,)  flattened memory representation
+        """
+        device = token_ids.device
+        dtype  = next(self.parameters()).dtype
+
+        if token_ids.dim() == 2:
+            token_ids = token_ids.squeeze(0)
+        T = token_ids.shape[0]
+
+        memory = SolarMemory(device=device, dtype=dtype,
+                             hard_lock=not self.training)
+
+        seq_reps = []
+        skip_x   = None
+
+        for t in range(T):
+            tok       = token_ids[t]
+            x         = self.embedding(tok).to(dtype)
+            word      = words[t] if t < len(words) else ''
+
+            for layer_idx, layer in enumerate(self.layers):
+                x, _, _ = layer.forward_with_physics(
+                    x, memory,
+                    token_text=word,
+                    token_pos=t,
+                    manager=manager,
+                    sun_state=sun_state,
+                )
+                if layer_idx == 0:
+                    skip_x = x
+                if layer_idx < N_LAYERS - 1:
+                    x = self.layer_dropout(x)
+
+            x = x + self.W_skip(skip_x.float()).to(dtype)
+            seq_reps.append(x)
+
+        flat        = memory.flatten()
+        context_vec = self.out_norm(self.W_out(flat.float()).to(dtype))
+
+        seq_tensor  = torch.stack(seq_reps, dim=0)        # (T, d)
+        seq_tensor  = seq_tensor + context_vec.unsqueeze(0)
+        logits      = self.lm_head(seq_tensor.float()).to(dtype)  # (T, V)
+
+        return logits, context_vec
+
     def get_memory_for_sentence(self, token_ids: torch.Tensor,
                                 role_labels: torch.Tensor = None,
                                 spawn_labels: torch.Tensor = None,

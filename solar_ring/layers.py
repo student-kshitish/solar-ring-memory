@@ -187,6 +187,62 @@ class SolarRingLayer(nn.Module):
 
         return x_out, role_logits, spawn_logit
 
+    def forward_with_physics(self, x_t, memory,
+                             token_text='', token_pos=0,
+                             manager=None, sun_state=None):
+        """
+        Full physics-enhanced forward pass.
+        Calls existing forward() first then adds:
+        1. Black/white hole event checking
+        2. Solar Spring attention on top of output
+
+        Returns same signature as forward() so it is
+        a drop-in enhancement not a replacement.
+        """
+        # Step 1: run existing forward pass unchanged
+        h_t, r_t, spawn_prob = self.forward(
+            x_t, memory,
+            write_enabled=(self.layer_idx == 0),
+        )
+
+        # Step 2: black/white hole events
+        if manager is not None and sun_state is not None:
+            events = manager.step(token_text, memory, sun_state)
+            if events:
+                pass  # events logged — rings updated in-place
+
+        # Step 3: solar spring enhancement on layer 5 only (CROSS_RING_LAYER=4)
+        if self.layer_idx == CROSS_RING_LAYER:
+            if not hasattr(self, 'spring_attn'):
+                from solar_ring.solar_spring import SolarSpringAttention
+                self.spring_attn = SolarSpringAttention(
+                    D_MODEL
+                ).to(x_t.device)
+
+            # Build concept list from memory rings using RingNode API
+            concepts = []
+            vecs_list = []
+            for i, ring in enumerate(memory.rings):
+                depth = ring.depth if ring.depth is not None else 0
+                concepts.append({
+                    'pos_idx':   depth,
+                    'depth':     depth,
+                    'token_pos': token_pos,
+                    'slot_idx':  i,
+                })
+                vec = ring.subject_vector() if ring.subj_locked else h_t
+                vecs_list.append(vec.float())
+
+            if len(concepts) > 1:
+                vecs_t = torch.stack(vecs_list)
+                spring_out, _, _ = self.spring_attn(
+                    concepts, vecs_t
+                )
+                # Residual: add spring output to h_t
+                h_t = h_t + (0.1 * spring_out.mean(0)).to(h_t.dtype)
+
+        return h_t, r_t, spawn_prob
+
     def parallel_planet_broadcast(self, x_t: torch.Tensor, memory) -> torch.Tensor:
         """
         Level 2 — multi-planet parallelism.
