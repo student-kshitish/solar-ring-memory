@@ -174,6 +174,142 @@ def conceptnet_score(pronoun_text: str, candidate_text: str,
     return score
 
 
+VERB_SUBJECT_SIGNALS = {
+    'thanked':   'first',
+    'helped':    'first',
+    'called':    'first',
+    'told':      'first',
+    'asked':     'first',
+    'warned':    'first',
+    'hired':     'first',
+    'fired':     'first',
+    'praised':   'first',
+    'blamed':    'first',
+    'avoided':   'first',
+    'contacted': 'first',
+    'visited':   'first',
+    'received':  'second',
+    'needed':    'second',
+}
+
+
+def syntactic_position_score(sentence: str,
+                              correct: str,
+                              wrong: str) -> tuple:
+    """
+    Use syntactic position to score candidates.
+    Subject of main verb is more likely antecedent
+    of subject pronoun (he/she/they).
+    Object of main verb is more likely antecedent
+    of object pronoun (him/her/them).
+
+    Simple heuristic: first named entity = subject
+                      second named entity = object
+    """
+    words = sentence.lower().split()
+    correct_word = correct.split()[0].lower().rstrip('.,')
+    wrong_word   = wrong.split()[0].lower().rstrip('.,')
+
+    pos_correct = -1
+    pos_wrong   = -1
+    for i, w in enumerate(words):
+        w_clean = w.rstrip('.,;')
+        if w_clean == correct_word and pos_correct == -1:
+            pos_correct = i
+        if w_clean == wrong_word and pos_wrong == -1:
+            pos_wrong = i
+
+    if pos_correct == -1 or pos_wrong == -1:
+        return 0.0, 0.0
+
+    PRONOUNS = {'it', 'he', 'she', 'they', 'him', 'her',
+                'them', 'who', 'which', 'that', 'his'}
+    pronoun_pos  = -1
+    pronoun_word = None
+    for i, w in enumerate(words):
+        if w.rstrip('.,') in PRONOUNS:
+            pronoun_pos  = i
+            pronoun_word = w.rstrip('.,')
+            break
+
+    if pronoun_pos == -1:
+        return 0.0, 0.0
+
+    score_c = 0.0
+    score_w = 0.0
+
+    # Subject pronouns prefer the FIRST entity (subject position)
+    if pronoun_word in ('he', 'she', 'they', 'who'):
+        if pos_correct < pos_wrong:
+            score_c += 0.4
+        else:
+            score_w += 0.4
+
+    # Object pronouns prefer the SECOND entity (object position)
+    if pronoun_word in ('him', 'her', 'them', 'whom'):
+        if pos_correct > pos_wrong:
+            score_c += 0.4
+        else:
+            score_w += 0.4
+
+    # Proximity — pronoun closer to antecedent slightly more likely
+    dist_c = abs(pronoun_pos - pos_correct)
+    dist_w = abs(pronoun_pos - pos_wrong)
+    if dist_c < dist_w:
+        score_c += 0.2
+    elif dist_w < dist_c:
+        score_w += 0.2
+
+    return score_c, score_w
+
+
+def verb_signal_score(sentence: str,
+                      correct: str,
+                      wrong: str) -> tuple:
+    """
+    Use verb semantics to identify subject vs object.
+    'Joan thanked Susan because she...'
+    → thanked subject = Joan = first entity
+    → 'she' more likely refers to Joan (subject)
+    """
+    words = sentence.lower().split()
+    correct_word = correct.split()[0].lower().rstrip('.,')
+    wrong_word   = wrong.split()[0].lower().rstrip('.,')
+
+    pos_correct = next(
+        (i for i, w in enumerate(words)
+         if w.rstrip('.,') == correct_word), -1
+    )
+    pos_wrong = next(
+        (i for i, w in enumerate(words)
+         if w.rstrip('.,') == wrong_word), -1
+    )
+
+    if pos_correct == -1 or pos_wrong == -1:
+        return 0.0, 0.0
+
+    for verb, who_is_subject in VERB_SUBJECT_SIGNALS.items():
+        if verb in words:
+            if who_is_subject == 'first':
+                first_entity = (correct_word
+                                if pos_correct < pos_wrong
+                                else wrong_word)
+                if first_entity == correct_word:
+                    return 0.5, 0.0
+                else:
+                    return 0.0, 0.5
+            else:
+                second_entity = (correct_word
+                                 if pos_correct > pos_wrong
+                                 else wrong_word)
+                if second_entity == correct_word:
+                    return 0.5, 0.0
+                else:
+                    return 0.0, 0.5
+
+    return 0.0, 0.0
+
+
 _ARTICLES = {'a', 'an', 'the', 'this', 'that', 'these', 'those'}
 
 

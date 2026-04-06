@@ -26,7 +26,11 @@ from benchmarks.winograd_enhanced import (
     score_with_sub_planet, score_with_sun_state,
     score_with_multi_system,
 )
-from solar_ring.conceptnet import apply_conceptnet_to_winograd
+from solar_ring.conceptnet import (
+    apply_conceptnet_to_winograd,
+    syntactic_position_score,
+    verb_signal_score,
+)
 
 
 def evaluate_with_conceptnet(solar, bilstm, vocab, verbose=False):
@@ -36,6 +40,7 @@ def evaluate_with_conceptnet(solar, bilstm, vocab, verbose=False):
         'sun_state':  {'correct': 0, 'total': 0},
         'multi_sys':  {'correct': 0, 'total': 0},
         'conceptnet': {'correct': 0, 'total': 0},
+        'syntactic':  {'correct': 0, 'total': 0},
         'bilstm':     {'correct': 0, 'total': 0},
     }
 
@@ -88,6 +93,17 @@ def evaluate_with_conceptnet(solar, bilstm, vocab, verbose=False):
         results['conceptnet']['correct'] += int(sc4 > sw4)
         results['conceptnet']['total']   += 1
 
+        # Phase 5: syntactic position + verb signal
+        syn_c,  syn_w  = syntactic_position_score(ctx, corr, wrong)
+        verb_c, verb_w = verb_signal_score(ctx, corr, wrong)
+
+        SYNTACTIC_WEIGHT = 1.5
+        sc5 = sc4 + SYNTACTIC_WEIGHT * (syn_c + verb_c)
+        sw5 = sw4 + SYNTACTIC_WEIGHT * (syn_w + verb_w)
+
+        results['syntactic']['correct'] += int(sc5 > sw5)
+        results['syntactic']['total']   += 1
+
         # BiLSTM baseline
         try:
             bc = get_logit(bilstm, ids_c)
@@ -123,6 +139,7 @@ def print_conceptnet_results(results):
         ('sun_state',  '+ Sun State resonance'),
         ('multi_sys',  '+ Multi-solar system'),
         ('conceptnet', '+ ConceptNet knowledge'),
+        ('syntactic',  '+ Syntactic position + verb signal'),
         ('bilstm',     'BiLSTM baseline'),
     ]
 
