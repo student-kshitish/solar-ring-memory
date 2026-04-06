@@ -286,12 +286,21 @@ def evaluate_spring(spring, head, vocab):
     total   = 0
 
     with torch.no_grad():
-        for ctx, corr, wrong in WINOGRAD_SCHEMAS:
+        for idx, (ctx, corr, wrong) in enumerate(WINOGRAD_SCHEMAS):
             try:
-                # Extract key entity and build training-format sentence
-                # ctx + key_entity (single last token) matches training format
-                ent_c  = extract_key_entity(corr, ctx)
-                ent_w  = extract_key_entity(wrong, ctx)
+                ent_c = extract_key_entity(corr, ctx)
+                ent_w = extract_key_entity(wrong, ctx)
+
+                if idx < 10:
+                    print(f"Schema {idx+1}:")
+                    print(f"  corr='{corr[:40]}' → ent_c='{ent_c}'")
+                    print(f"  wrong='{wrong[:40]}' → ent_w='{ent_w}'")
+
+                if ent_c == ent_w:
+                    if idx < 10:
+                        print(f"  SKIPPED: same entity")
+                    continue
+
                 sent_c = ctx + ' ' + ent_c
                 sent_w = ctx + ' ' + ent_w
 
@@ -305,19 +314,17 @@ def evaluate_spring(spring, head, vocab):
                 L_w = len(conc_w)
 
                 p_idx_c = find_pronoun_idx(sent_c)
-                p_idx_w = find_pronoun_idx(sent_w)
-                cand_c  = L_c - 1   # entity is last token
+                cand_c  = L_c - 1
                 cand_w  = L_w - 1
 
-                if (A_c is not None and
-                        cand_c < L_c and p_idx_c < L_c):
+                if A_c is not None and cand_c < L_c and p_idx_c < L_c:
                     attn_c = A_c[cand_c, p_idx_c]
                     vec_c  = out_c[cand_c] + attn_c * out_c[p_idx_c]
                 else:
                     vec_c = out_c.mean(0)
 
-                if (A_w is not None and
-                        cand_w < L_w and p_idx_w < L_w):
+                p_idx_w = find_pronoun_idx(sent_w)
+                if A_w is not None and cand_w < L_w and p_idx_w < L_w:
                     attn_w = A_w[cand_w, p_idx_w]
                     vec_w  = out_w[cand_w] + attn_w * out_w[p_idx_w]
                 else:
@@ -326,11 +333,17 @@ def evaluate_spring(spring, head, vocab):
                 lc = head(vec_c.float()).item()
                 lw = head(vec_w.float()).item()
 
-                if lc > lw:
+                result = lc > lw
+                if idx < 10:
+                    print(f"  lc={lc:.3f} lw={lw:.3f} → {'CORRECT' if result else 'WRONG'}")
+
+                if result:
                     correct += 1
                 total += 1
 
-            except Exception:
+            except Exception as e:
+                if idx < 10:
+                    print(f"  ERROR: {e}")
                 continue
 
     acc = correct / max(total, 1) * 100
