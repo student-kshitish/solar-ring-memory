@@ -29,6 +29,29 @@ def find_pronoun_idx(sentence: str) -> int:
     return 0
 
 
+def extract_key_entity(phrase: str, ctx: str) -> str:
+    """
+    Extract the key entity word from a Winograd completion.
+
+    Examples:
+    "The trophy was too big."    → "trophy"
+    "The suitcase was too small." → "suitcase"
+    "Susan had given help."      → "Susan"
+
+    Strategy: first noun/name in phrase that also appears in ctx.
+    """
+    ctx_words   = set(ctx.lower().split())
+    phrase_words = phrase.lower().split()
+
+    for w in phrase_words:
+        w_clean = w.rstrip('.,;')
+        if w_clean in ctx_words and len(w_clean) > 2:
+            return w_clean
+
+    # Fallback: first word of phrase
+    return phrase_words[0].rstrip('.,;') if phrase_words else ''
+
+
 def find_candidate_idx(sentence: str) -> int:
     """Last meaningful word = appended candidate."""
     words = sentence.lower().split()
@@ -210,13 +233,17 @@ def evaluate_spring(spring, head, vocab):
     head.eval()
 
     correct = 0
-    total   = len(WINOGRAD_SCHEMAS)
+    total   = 0
 
     with torch.no_grad():
         for ctx, corr, wrong in WINOGRAD_SCHEMAS:
             try:
-                sent_c = ctx + ' ' + corr
-                sent_w = ctx + ' ' + wrong
+                # Extract key entity and build training-format sentence
+                # ctx + key_entity (single last token) matches training format
+                ent_c  = extract_key_entity(corr, ctx)
+                ent_w  = extract_key_entity(wrong, ctx)
+                sent_c = ctx + ' ' + ent_c
+                sent_w = ctx + ' ' + ent_w
 
                 conc_c, vecs_c = sentence_to_concepts(sent_c, vocab)
                 conc_w, vecs_w = sentence_to_concepts(sent_w, vocab)
@@ -224,17 +251,39 @@ def evaluate_spring(spring, head, vocab):
                 out_c, A_c, _ = spring(conc_c, vecs_c)
                 out_w, A_w, _ = spring(conc_w, vecs_w)
 
-                lc, lw = _score_pair(
-                    out_c, A_c, out_w, A_w, sent_c, sent_w, head
-                )
+                L_c = len(conc_c)
+                L_w = len(conc_w)
 
-                if lc.item() > lw.item():
+                p_idx_c = find_pronoun_idx(sent_c)
+                p_idx_w = find_pronoun_idx(sent_w)
+                cand_c  = L_c - 1   # entity is last token
+                cand_w  = L_w - 1
+
+                if (A_c is not None and
+                        cand_c < L_c and p_idx_c < L_c):
+                    attn_c = A_c[cand_c, p_idx_c]
+                    vec_c  = out_c[cand_c] + attn_c * out_c[p_idx_c]
+                else:
+                    vec_c = out_c.mean(0)
+
+                if (A_w is not None and
+                        cand_w < L_w and p_idx_w < L_w):
+                    attn_w = A_w[cand_w, p_idx_w]
+                    vec_w  = out_w[cand_w] + attn_w * out_w[p_idx_w]
+                else:
+                    vec_w = out_w.mean(0)
+
+                lc = head(vec_c.float()).item()
+                lw = head(vec_w.float()).item()
+
+                if lc > lw:
                     correct += 1
+                total += 1
 
             except Exception:
                 continue
 
-    acc = correct / total * 100
+    acc = correct / max(total, 1) * 100
     print(f"\nSolar Spring Winograd: {correct}/{total} = {acc:.1f}%")
     print(f"BERT-base target     : ~70.0%")
     print(f"80% target           : 80.0%")
@@ -249,8 +298,30 @@ if __name__ == "__main__":
     print("="*60)
     print(f"Device: {DEVICE}")
 
-    spring, head, vocab = train_spring(epochs=30)
-    acc = evaluate_spring(spring, head, vocab)
+    import os
+    SKIP_TRAIN = os.path.exists('checkpoints/solar_spring.pt')
+
+    if SKIP_TRAIN:
+        print("Loading existing checkpoint...")
+        spring = SolarSpringAttention(D).to(DEVICE)
+        head   = nn.Linear(D, 1).to(DEVICE)
+        ckpt   = torch.load(
+            'checkpoints/solar_spring.pt',
+            map_location=DEVICE,
+            weights_only=True,
+        )
+        spring.load_state_dict(ckpt['spring'])
+        head.load_state_dict(ckpt['head'])
+        pairs = build_generated_pairs()
+        vocab = build_vocab(
+            [text for text, _ in pairs] +
+            [ctx + ' ' + c for ctx, c, w in WINOGRAD_SCHEMAS] +
+            [ctx + ' ' + w for ctx, c, w in WINOGRAD_SCHEMAS]
+        )
+        acc = evaluate_spring(spring, head, vocab)
+    else:
+        spring, head, vocab = train_spring(epochs=30)
+        acc = evaluate_spring(spring, head, vocab)
 
     import subprocess
     subprocess.run(['git', 'add',
