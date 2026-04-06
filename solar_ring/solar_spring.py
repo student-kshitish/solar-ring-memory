@@ -112,7 +112,7 @@ class SolarSpringAttention(nn.Module):
                 confidences: list = None,
                 sun_resonances: list = None) -> tuple:
         """
-        Compute unified field attention scores.
+        Compute unified field attention scores (fully vectorized).
 
         Args:
             concepts: list of dicts with keys:
@@ -122,80 +122,89 @@ class SolarSpringAttention(nn.Module):
             sun_resonances: list of floats per concept
 
         Returns:
-            attended: (L, d)
-            score_matrix: (L, L) for interpretability
+            out: (L, d)
+            A:  (L, L) attention weights
+            scores: (L, L) raw unified field scores
         """
-        L = len(concepts)
+        L   = len(concepts)
+        dev = token_vecs.device
         if confidences is None:
             confidences = [1.0] * L
         if sun_resonances is None:
             sun_resonances = [0.0] * L
 
-        # Compute masses
-        masses = [
-            self.semantic_mass(
-                token_vecs[i],
-                concepts[i].get('pos_idx', 0),
-                sun_resonances[i]
-            )
-            for i in range(L)
-        ]
+        # ── Extract concept arrays ───────────────────────────────
+        pos_idx_t  = torch.tensor(
+            [c.get('pos_idx', 0) % N_POS for c in concepts],
+            device=dev, dtype=torch.long)
+        depth_t    = torch.tensor(
+            [float(c.get('depth', 0)) for c in concepts],
+            device=dev)
+        tok_pos_t  = torch.tensor(
+            [float(c.get('token_pos', i))
+             for i, c in enumerate(concepts)],
+            device=dev)
+        slot_idx_t = torch.tensor(
+            [float(c.get('slot_idx', 0)) for c in concepts],
+            device=dev)
+        conf_t     = torch.tensor(confidences, device=dev)
+        res_t      = torch.tensor(sun_resonances, device=dev)
 
-        # Build unified field score matrix
-        scores = torch.zeros(L, L, device=token_vecs.device)
+        # ── Semantic masses ──────────────────────────────────────
+        pos_types  = list(POS_MASS_WEIGHTS.keys())
+        pw_list    = [POS_MASS_WEIGHTS.get(pos_types[p % N_POS], 0.1)
+                      for p in range(N_POS)]
+        pos_w_t    = torch.tensor(pw_list, device=dev)
+        w          = pos_w_t[pos_idx_t]                 # (L,)
+        norms      = token_vecs.norm(dim=-1)             # (L,)
+        masses     = norms * w * (1.0 + res_t)           # (L,)
 
-        for i in range(L):
-            ci  = concepts[i]
-            mi  = masses[i]
-            bh_i = self.black_hole_force(confidences[i])
+        # ── Black hole forces  ───────────────────────────────────
+        EVENT_HORIZON = 0.1
+        gap    = (conf_t - EVENT_HORIZON).clamp(min=1e-6)
+        bh     = -0.01 / gap.pow(2)
+        bh     = torch.where(conf_t <= EVENT_HORIZON,
+                             torch.full_like(bh, -1e6), bh)
 
-            if bh_i < -1e5:
-                # Collapsed ring — no attraction
-                continue
+        # ── Pairwise (L, L) fields ───────────────────────────────
+        mi = masses.unsqueeze(1)          # (L, 1)
+        mj = masses.unsqueeze(0)          # (1, L)
 
-            for j in range(L):
-                if i == j:
-                    continue
+        # Micro gravity: sigmoid(G_micro[pi,pj]) * mi*mj / dist²
+        pi    = pos_idx_t.unsqueeze(1).expand(L, L)
+        pj    = pos_idx_t.unsqueeze(0).expand(L, L)
+        G_k   = torch.sigmoid(self.G_micro)[pi, pj]     # (L, L)
+        sd    = (slot_idx_t.unsqueeze(1) -
+                 slot_idx_t.unsqueeze(0)).abs().clamp(min=1)
+        f_micro = G_k * mi * mj / sd.pow(2)
 
-                cj  = concepts[j]
-                mj  = masses[j]
+        # Macro gravity: sigmoid(G_macro) * mi*mj / depth_dist²
+        G_Ω   = torch.sigmoid(self.G_macro)
+        dd    = (depth_t.unsqueeze(1) -
+                 depth_t.unsqueeze(0)).abs() + 1
+        f_macro = G_Ω * mi * mj / dd.pow(2)
 
-                # Micro gravity
-                slot_dist = abs(
-                    ci.get('slot_idx', 0) -
-                    cj.get('slot_idx', 0)
-                )
-                f_micro = self.micro_gravity(
-                    mi, mj,
-                    ci.get('pos_idx', 0),
-                    cj.get('pos_idx', 0),
-                    slot_dist
-                )
+        # Spring force: sigmoid(k[pi]) * token_dist
+        k_pi  = torch.sigmoid(self.k_spring)[pos_idx_t]  # (L,)
+        td    = (tok_pos_t.unsqueeze(1) -
+                 tok_pos_t.unsqueeze(0)).abs()
+        f_spring = k_pi.unsqueeze(1) * td               # (L, L)
 
-                # Macro gravity
-                f_macro = self.macro_gravity(
-                    mi, mj,
-                    ci.get('depth', 0),
-                    cj.get('depth', 0)
-                )
+        # Black hole (per row and col)
+        bh_i = bh.unsqueeze(1).expand(L, L)
+        bh_j = bh.unsqueeze(0).expand(L, L)
 
-                # Spring force
-                token_dist = abs(
-                    ci.get('token_pos', i) -
-                    cj.get('token_pos', j)
-                )
-                f_spring = self.spring_force(
-                    ci.get('pos_idx', 0), token_dist
-                )
+        # Collapsed rows → no attraction
+        collapsed = (conf_t <= EVENT_HORIZON)
+        row_mask  = collapsed.unsqueeze(1).expand(L, L)
 
-                # Black hole repulsion for j
-                bh_j = self.black_hole_force(confidences[j])
+        # Unified field matrix
+        scores = f_micro + f_macro + f_spring + bh_i + bh_j
+        scores = scores.masked_fill(row_mask, -1e6)
 
-                # Unified field
-                scores[i, j] = (
-                    f_micro + f_macro +
-                    f_spring + bh_i + bh_j
-                )
+        # Zero diagonal
+        eye    = torch.eye(L, device=dev, dtype=torch.bool)
+        scores = scores.masked_fill(eye, 0.0)
 
         # Temperature-scaled softmax
         T = torch.clamp(self.temperature.abs(), min=0.1)
