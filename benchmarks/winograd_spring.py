@@ -18,23 +18,62 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 DTYPE  = torch.bfloat16
 D      = 300
 
-PRONOUNS = {'it','he','she','they','him','her',
-            'them','who','which','that','its'}
-
 
 def find_pronoun_idx(sentence: str) -> int:
+    PRONOUNS = {'it','he','she','they','him','her',
+                'them','who','which','that','its'}
     words = sentence.lower().split()
     for i, w in enumerate(words):
         if w.rstrip('.,') in PRONOUNS:
             return i
-    return len(words) - 1  # fallback: last token
+    return 0
+
+
+def find_candidate_idx(sentence: str) -> int:
+    """Last meaningful word = appended candidate."""
+    words = sentence.lower().split()
+    for i in range(len(words) - 1, -1, -1):
+        w = words[i].rstrip('.,;')
+        if len(w) > 1:
+            return i
+    return len(words) - 1
+
+
+def _score_pair(out_c, A_c, out_w, A_w,
+                sent_c, sent_w, head):
+    """
+    Score = candidate's backward attention TO pronoun.
+    A[candidate_idx, pronoun_idx] — how much the appended
+    candidate attends back to the pronoun in ctx.
+    """
+    L_c = out_c.shape[0]
+    L_w = out_w.shape[0]
+
+    p_idx_c = find_pronoun_idx(sent_c)
+    p_idx_w = find_pronoun_idx(sent_w)
+    cand_c  = find_candidate_idx(sent_c)
+    cand_w  = find_candidate_idx(sent_w)
+
+    if (A_c is not None and cand_c < L_c and p_idx_c < L_c):
+        attn_score_c = A_c[cand_c, p_idx_c]
+        vec_c = out_c[cand_c] + attn_score_c * out_c[p_idx_c]
+    else:
+        vec_c = out_c.mean(0)
+
+    if (A_w is not None and cand_w < L_w and p_idx_w < L_w):
+        attn_score_w = A_w[cand_w, p_idx_w]
+        vec_w = out_w[cand_w] + attn_score_w * out_w[p_idx_w]
+    else:
+        vec_w = out_w.mean(0)
+
+    logit_c = head(vec_c.float())
+    logit_w = head(vec_w.float())
+    return logit_c, logit_w
 
 
 def sentence_to_concepts(sentence: str, vocab: dict,
                           depth: int = 0) -> tuple:
-    """
-    Convert sentence to concept list and token vectors.
-    """
+    """Convert sentence to concept list and token vectors."""
     words = sentence.lower().split()
 
     POS_LOOKUP = {
@@ -55,9 +94,9 @@ def sentence_to_concepts(sentence: str, vocab: dict,
     for t, word in enumerate(words):
         wclean = word.rstrip('.,;')
         if wclean in SUBJ_WORDS:
-            pos_idx = 0   # SUBJ
+            pos_idx = 0
         elif wclean in OBJ_WORDS:
-            pos_idx = 2   # OBJ
+            pos_idx = 2
         else:
             pos_idx = POS_LOOKUP.get(wclean, 3)
 
@@ -86,12 +125,9 @@ def train_spring(epochs: int = 30):
         list(spring.parameters()) + list(head.parameters()),
         lr=3e-4, weight_decay=0.01
     )
-    loss_fn = nn.BCEWithLogitsLoss()
 
-    # build_generated_pairs() returns (text, label) 2-tuples
     pairs = build_generated_pairs()
 
-    # Build vocab from all texts
     all_texts = (
         [text for text, _ in pairs] +
         [ctx + ' ' + c for ctx, c, w in WINOGRAD_SCHEMAS] +
@@ -99,8 +135,6 @@ def train_spring(epochs: int = 30):
     )
     vocab = build_vocab(all_texts)
 
-    # Pair up correct/wrong consecutive entries for contrastive loss:
-    # build_generated_pairs alternates label=1 then label=0
     train_pairs = []
     for i in range(0, len(pairs) - 1, 2):
         text_c, lc = pairs[i]
@@ -108,7 +142,7 @@ def train_spring(epochs: int = 30):
         if lc == 1 and lw == 0:
             train_pairs.append((text_c, text_w))
 
-    train_pairs = train_pairs[:600]   # 1200 items → 600 contrastive pairs
+    train_pairs = train_pairs[:600]
     print(f"Training on {len(train_pairs)} contrastive pairs, "
           f"{epochs} epochs...")
 
@@ -122,50 +156,23 @@ def train_spring(epochs: int = 30):
         for sent_c, sent_w in train_pairs:
             optimizer.zero_grad()
             try:
-
                 conc_c, vecs_c = sentence_to_concepts(sent_c, vocab)
                 conc_w, vecs_w = sentence_to_concepts(sent_w, vocab)
 
-                out_c, A_c, scores_c = spring(conc_c, vecs_c)
-                out_w, A_w, scores_w = spring(conc_w, vecs_w)
+                out_c, A_c, _ = spring(conc_c, vecs_c)
+                out_w, A_w, _ = spring(conc_w, vecs_w)
 
-                # Find pronoun position in each sentence
-                pronoun_idx_c = find_pronoun_idx(sent_c)
-                pronoun_idx_w = find_pronoun_idx(sent_w)
-
-                # Score pronoun's attention row — not mean pool
-                L_c = len(conc_c)
-                L_w = len(conc_w)
-
-                if pronoun_idx_c < L_c and A_c is not None:
-                    pronoun_vec_c = out_c[pronoun_idx_c]
-                else:
-                    pronoun_vec_c = out_c.mean(0)
-
-                if pronoun_idx_w < L_w and A_w is not None:
-                    pronoun_vec_w = out_w[pronoun_idx_w]
-                else:
-                    pronoun_vec_w = out_w.mean(0)
-
-                logit_c = head(pronoun_vec_c)
-                logit_w = head(pronoun_vec_w)
-
-                t1 = torch.ones(1,  device=DEVICE)
-                t0 = torch.zeros(1, device=DEVICE)
-
-                # Margin loss — directly push logit_c above logit_w
-                margin_loss = torch.clamp(
-                    1.0 - logit_c.float() + logit_w.float(),
-                    min=0.0
-                ).mean()
-
-                # BCE loss for absolute calibration
-                bce_loss = (
-                    loss_fn(logit_c.float().squeeze(), t1.squeeze()) +
-                    loss_fn(logit_w.float().squeeze(), t0.squeeze())
+                logit_c, logit_w = _score_pair(
+                    out_c, A_c, out_w, A_w, sent_c, sent_w, head
                 )
 
-                loss = margin_loss + 0.5 * bce_loss
+                # Margin loss only — BCE was hurting
+                loss = torch.clamp(
+                    1.0 - logit_c.squeeze().float()
+                        + logit_w.squeeze().float(),
+                    min=0.0
+                )
+
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
                     list(spring.parameters()) +
@@ -217,20 +224,11 @@ def evaluate_spring(spring, head, vocab):
                 out_c, A_c, _ = spring(conc_c, vecs_c)
                 out_w, A_w, _ = spring(conc_w, vecs_w)
 
-                pronoun_idx_c = find_pronoun_idx(sent_c)
-                pronoun_idx_w = find_pronoun_idx(sent_w)
+                lc, lw = _score_pair(
+                    out_c, A_c, out_w, A_w, sent_c, sent_w, head
+                )
 
-                if pronoun_idx_c < len(conc_c):
-                    lc = head(out_c[pronoun_idx_c]).item()
-                else:
-                    lc = head(out_c.mean(0)).item()
-
-                if pronoun_idx_w < len(conc_w):
-                    lw = head(out_w[pronoun_idx_w]).item()
-                else:
-                    lw = head(out_w.mean(0)).item()
-
-                if lc > lw:
+                if lc.item() > lw.item():
                     correct += 1
 
             except Exception:
