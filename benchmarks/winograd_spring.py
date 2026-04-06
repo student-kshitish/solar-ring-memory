@@ -29,6 +29,18 @@ def find_pronoun_idx(sentence: str) -> int:
     return 0
 
 
+_STOPWORDS = {
+    'the','a','an','this','that','these','those',
+    'is','was','were','are','be','been','being',
+    'had','has','have','did','do','does',
+    'too','very','so','just','also','not',
+    'and','or','but','for','with','from',
+    'its','his','her','their','our','my','your',
+    'in','on','at','to','of','by','as',
+    'it','he','she','they','who','which',
+}
+
+
 def extract_key_entity(phrase: str, ctx: str) -> str:
     """
     Extract the key entity word from a Winograd completion.
@@ -38,17 +50,25 @@ def extract_key_entity(phrase: str, ctx: str) -> str:
     "The suitcase was too small." → "suitcase"
     "Susan had given help."      → "Susan"
 
-    Strategy: first noun/name in phrase that also appears in ctx.
+    Strategy: first content word in phrase that also appears in ctx,
+    skipping stopwords and articles.
     """
-    ctx_words   = set(ctx.lower().split())
+    ctx_words    = set(ctx.lower().split())
     phrase_words = phrase.lower().split()
 
     for w in phrase_words:
         w_clean = w.rstrip('.,;')
-        if w_clean in ctx_words and len(w_clean) > 2:
+        if (w_clean not in _STOPWORDS
+                and len(w_clean) > 2
+                and w_clean in ctx_words):
             return w_clean
 
-    # Fallback: first word of phrase
+    # Fallback: first non-stopword content word in phrase
+    for w in phrase_words:
+        w_clean = w.rstrip('.,;')
+        if w_clean not in _STOPWORDS and len(w_clean) > 2:
+            return w_clean
+
     return phrase_words[0].rstrip('.,;') if phrase_words else ''
 
 
