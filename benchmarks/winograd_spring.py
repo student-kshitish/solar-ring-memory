@@ -199,15 +199,45 @@ def train_spring(epochs: int = 30):
         for sent_c, sent_w in train_pairs:
             optimizer.zero_grad()
             try:
-                conc_c, vecs_c = sentence_to_concepts(sent_c, vocab)
-                conc_w, vecs_w = sentence_to_concepts(sent_w, vocab)
+                # Normalize to training-eval consistent format:
+                # split "ctx. completion" → extract entity → "ctx entity"
+                if '. ' in sent_c:
+                    ctx_part, compl_c = sent_c.split('. ', 1)
+                    _, compl_w = sent_w.split('. ', 1)
+                    ent_c  = extract_key_entity(compl_c, ctx_part)
+                    ent_w  = extract_key_entity(compl_w, ctx_part)
+                    norm_c = ctx_part + ' ' + ent_c
+                    norm_w = ctx_part + ' ' + ent_w
+                else:
+                    norm_c, norm_w = sent_c, sent_w
+
+                conc_c, vecs_c = sentence_to_concepts(norm_c, vocab)
+                conc_w, vecs_w = sentence_to_concepts(norm_w, vocab)
 
                 out_c, A_c, _ = spring(conc_c, vecs_c)
                 out_w, A_w, _ = spring(conc_w, vecs_w)
 
-                logit_c, logit_w = _score_pair(
-                    out_c, A_c, out_w, A_w, sent_c, sent_w, head
-                )
+                L_c = len(conc_c)
+                L_w = len(conc_w)
+                p_idx_c = find_pronoun_idx(norm_c)
+                p_idx_w = find_pronoun_idx(norm_w)
+                cand_c  = L_c - 1   # entity is last token
+                cand_w  = L_w - 1
+
+                if (A_c is not None and cand_c < L_c and p_idx_c < L_c):
+                    attn_c  = A_c[cand_c, p_idx_c]
+                    vec_c   = out_c[cand_c] + attn_c * out_c[p_idx_c]
+                else:
+                    vec_c = out_c.mean(0)
+
+                if (A_w is not None and cand_w < L_w and p_idx_w < L_w):
+                    attn_w  = A_w[cand_w, p_idx_w]
+                    vec_w   = out_w[cand_w] + attn_w * out_w[p_idx_w]
+                else:
+                    vec_w = out_w.mean(0)
+
+                logit_c = head(vec_c.float())
+                logit_w = head(vec_w.float())
 
                 # Margin loss only — BCE was hurting
                 loss = torch.clamp(
