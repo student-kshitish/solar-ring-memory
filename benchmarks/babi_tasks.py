@@ -138,6 +138,26 @@ TASK3_DATA = [
      "Where is the coin?", "office"),
     ("Mary picked up the ring. Mary moved to the garden. Mary went to the bedroom.",
      "Where is the ring?", "bedroom"),
+    ("John picked up the shoe. John went to the hallway. John travelled to the garden.",
+     "Where is the shoe?", "garden"),
+    ("Mary grabbed the brush. Mary moved to the kitchen. Mary went to the office.",
+     "Where is the brush?", "office"),
+    ("Sandra took the hat. Sandra went to the office. Sandra moved to the bedroom.",
+     "Where is the hat?", "bedroom"),
+    ("Daniel picked up the watch. Daniel moved to the garden. Daniel went to the hallway.",
+     "Where is the watch?", "hallway"),
+    ("John grabbed the phone. John went to the bedroom. John moved to the kitchen.",
+     "Where is the phone?", "kitchen"),
+    ("Mary took the jar. Mary moved to the hallway. Mary went to the garden.",
+     "Where is the jar?", "garden"),
+    ("Sandra picked up the ball. Sandra went to the kitchen. Sandra moved to the office.",
+     "Where is the ball?", "office"),
+    ("Daniel grabbed the book. Daniel moved to the office. Daniel went to the bedroom.",
+     "Where is the book?", "bedroom"),
+    ("John took the bag. John went to the garden. John moved to the hallway.",
+     "Where is the bag?", "hallway"),
+    ("Mary picked up the cup. Mary moved to the bedroom. Mary went to the kitchen.",
+     "Where is the cup?", "kitchen"),
 ]
 
 # ── Slot-reading evaluator ───────────────────────────────────
@@ -155,49 +175,63 @@ MOVE_VERBS = {
 
 def extract_answer_rule_based(story: str,
                                question: str) -> str:
-    """
-    Rule-based slot reading — what Solar Ring does natively.
-    Find last location mentioned for the queried entity.
-    """
-    question_lower = question.lower()
+    sentences = [
+        s.strip() for s in story.split('.')
+        if s.strip()
+    ]
+    words_clean = lambda s: [
+        w.rstrip('.,!?;:').lower() for w in s.split()
+    ]
 
-    # Find who is being asked about
-    q_words = [w.rstrip('.,!?;:') for w in question_lower.split()]
-    subject = None
-    for w in q_words:
-        if w in ('john','mary','sandra','daniel',
-                 'alice','bob','the'):
-            subject = w
-            break
+    q_words = words_clean(question)
 
-    # Find what object is being tracked
-    is_object_question = 'where is the' in question_lower
+    # Find tracked object from question
     tracked_object = None
-    if is_object_question:
-        obj_words = question_lower.replace(
-            'where is the', ''
-        ).strip().rstrip('?').strip().split()
-        if obj_words:
-            tracked_object = obj_words[0]
+    tracked_person = None
 
-    # Scan story for last known location
+    if 'where' in q_words and 'is' in q_words:
+        # "Where is the football?" → football
+        # "Where is John?" → John
+        for i, w in enumerate(q_words):
+            if w in ('the','a','an') and i+1 < len(q_words):
+                tracked_object = q_words[i+1].rstrip('?')
+                break
+            if w in ('john','mary','sandra','daniel',
+                     'alice','bob'):
+                tracked_person = w.rstrip('?')
+                break
+
+    # Step 1: Find who picked up the object
+    carrier = None
+    if tracked_object:
+        for sent in sentences:
+            sw = words_clean(sent)
+            pick_verbs = {'picked','grabbed','took',
+                         'got','lifted','carried'}
+            if (tracked_object in sw and
+                any(v in sw for v in pick_verbs)):
+                # First word is usually the person
+                if sw:
+                    carrier = sw[0]
+                break
+
+        # Track that person's last location
+        if carrier:
+            tracked_person = carrier
+
+    # Step 2: Find last location of tracked person/object
     last_location = None
-    sentences = story.split('.')
-
     for sent in sentences:
-        sent_words = [w.rstrip('.,!?;:') for w in sent.lower().split()]
-
-        # Check if this sentence is about our entity
-        relevant = False
-        if tracked_object:
-            if tracked_object in sent_words:
-                relevant = True
-        elif subject:
-            if subject in sent_words:
-                relevant = True
-
-        if relevant:
-            for w in sent_words:
+        sw = words_clean(sent)
+        move_verbs = {'travelled','went','moved',
+                     'journeyed','walked','ran'}
+        if (tracked_person and tracked_person in sw and
+            any(v in sw for v in move_verbs)):
+            for w in sw:
+                if w in LOCATIONS:
+                    last_location = w
+        elif (tracked_object and tracked_object in sw):
+            for w in sw:
                 if w in LOCATIONS:
                     last_location = w
 
