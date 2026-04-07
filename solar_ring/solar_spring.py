@@ -287,3 +287,54 @@ class SolarSpringAttention(nn.Module):
         out      = self.W_out(attended)
 
         return out, A, scores
+
+    def forward_with_light_speed(self, concepts, token_vecs,
+                                  confidences=None,
+                                  sun_resonances=None):
+        """
+        Solar Spring + Light Speed constraints.
+        Runs existing forward() then applies:
+        1. Causal light cone masking
+        2. Redshift on attention scores
+        3. Photon bypass for pronouns
+        """
+        from solar_ring.light_speed import LightSpeedMemory
+
+        if not hasattr(self, 'light_speed'):
+            self.light_speed = LightSpeedMemory(
+                self.d
+            ).to(token_vecs.device)
+
+        # Run base Solar Spring forward
+        out, A, scores = self.forward(
+            concepts, token_vecs,
+            confidences, sun_resonances
+        )
+
+        if A is None or scores is None:
+            return out, A, scores
+
+        # Extract positions and POS indices
+        positions   = [c.get('token_pos', i)
+                       for i, c in enumerate(concepts)]
+        pos_indices = [c.get('pos_idx', 0)
+                       for c in concepts]
+
+        # Apply light speed constraints to scores.
+        # Use no_grad: LightSpeedMemory.forward has an in-place
+        # op on the softmax output (A[mask]=0) that breaks autograd.
+        # Spring params get full gradients through `out`; ls_attended
+        # contributes as a detached causal-cone signal.
+        with torch.no_grad():
+            ls_attended, ls_scores, photon_mask = \
+                self.light_speed(
+                    token_vecs, positions,
+                    pos_indices, scores.detach()
+                )
+        ls_attended = ls_attended.detach()
+
+        # Blend: 70% spring + 30% light speed
+        ALPHA = 0.3
+        blended = (1 - ALPHA) * out + ALPHA * ls_attended
+
+        return blended, ls_scores, photon_mask
