@@ -2,220 +2,413 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.patches import FancyBboxPatch
+from matplotlib.patches import FancyBboxPatch, Circle
+from matplotlib.lines import Line2D
+import numpy as np
 import os
 os.makedirs('docs', exist_ok=True)
 
-fig, axes = plt.subplots(1, 2, figsize=(22, 16))
-fig.patch.set_facecolor('#0d1117')
+BG     = '#0d1117'
+BORDER = '#30363d'
+WHITE  = '#f0f6fc'
+GRAY   = '#8b949e'
+BLUE   = '#58a6ff'
+GREEN  = '#3fb950'
+PURPLE = '#bc8cff'
+ORANGE = '#ffa657'
+RED    = '#ff7b72'
+GOLD   = '#e3b341'
+TEAL   = '#39d353'
 
-# ─── LEFT: 6-Level Hierarchy ───────────────────────────────
-ax = axes[0]
-ax.set_facecolor('#0d1117')
+# ════════════════════════════════════════════
+# FIGURE 1 — Layer Stack (tall, clean)
+# ════════════════════════════════════════════
+fig1, ax = plt.subplots(figsize=(10, 14))
+fig1.patch.set_facecolor(BG)
+ax.set_facecolor(BG)
 ax.set_xlim(0, 10)
-ax.set_ylim(0, 22)
+ax.set_ylim(0, 14)
 ax.axis('off')
-ax.set_title('Solar Ring Memory — Complete 6-Level Hierarchy',
-             color='white', fontsize=14, fontweight='bold', pad=12)
 
-def box(ax, x, y, w, h, label, sub='',
-        color='#1f6feb', tc='white', alpha=0.9, fs=9):
-    p = FancyBboxPatch((x, y), w, h,
-                        boxstyle="round,pad=0.1",
-                        facecolor=color, edgecolor='white',
-                        linewidth=1.2, alpha=alpha)
-    ax.add_patch(p)
+def rbox(ax, x, y, w, h, text, sub=None,
+         fc='#161b22', ec=BORDER, tc=WHITE,
+         fs=9, bold=True):
+    ax.add_patch(FancyBboxPatch(
+        (x, y), w, h,
+        boxstyle="round,pad=0.12",
+        facecolor=fc, edgecolor=ec,
+        linewidth=1.5, zorder=3
+    ))
     if sub:
-        ax.text(x+w/2, y+h*0.65, label, ha='center',
-                va='center', color=tc, fontsize=fs,
-                fontweight='bold')
-        ax.text(x+w/2, y+h*0.25, sub, ha='center',
-                va='center', color=tc, fontsize=fs-2,
-                alpha=0.85)
+        ax.text(x+w/2, y+h*0.62, text,
+                ha='center', va='center',
+                color=tc, fontsize=fs,
+                fontweight='bold' if bold else 'normal',
+                zorder=4)
+        ax.text(x+w/2, y+h*0.25, sub,
+                ha='center', va='center',
+                color=GRAY, fontsize=fs-1.5,
+                zorder=4)
     else:
-        ax.text(x+w/2, y+h/2, label, ha='center',
-                va='center', color=tc, fontsize=fs,
-                fontweight='bold')
+        ax.text(x+w/2, y+h/2, text,
+                ha='center', va='center',
+                color=tc, fontsize=fs,
+                fontweight='bold' if bold else 'normal',
+                zorder=4)
 
-def arrow(ax, x1, y1, x2, y2, c='#58a6ff'):
-    ax.annotate('', xy=(x2,y2), xytext=(x1,y1),
-                arrowprops=dict(arrowstyle='->',
-                               color=c, lw=1.8))
+def arr(ax, x, y1, y2, c=BLUE):
+    ax.annotate('',
+        xy=(x, y2), xytext=(x, y1),
+        arrowprops=dict(
+            arrowstyle='->', color=c,
+            lw=1.8, mutation_scale=14
+        ), zorder=5)
 
-# Level 6 — Multiverse
-box(ax, 0.3, 20.2, 9.4, 1.2,
-    'LEVEL 6 — Multiverse',
-    'Parallel ambiguous interpretations · collapse when P > 0.80',
-    color='#4c1d95', tc='#e9d5ff', fs=10)
-arrow(ax, 5, 20.2, 5, 19.5)
+# Title
+ax.text(5, 13.6, 'Solar Ring Memory',
+        ha='center', color=WHITE,
+        fontsize=16, fontweight='bold')
+ax.text(5, 13.2, 'Architecture — Layer Stack',
+        ha='center', color=GRAY, fontsize=11)
 
-# Level 5 — Galaxy
-box(ax, 0.3, 18.5, 9.4, 1.2,
-    'LEVEL 5 — Galaxy',
-    'All documents on same topic · Galactic Core = topic embedding',
-    color='#1e3a5f', tc='#bfdbfe', fs=10)
-arrow(ax, 5, 18.5, 5, 17.8)
+# Input token
+rbox(ax, 2.5, 12.2, 5, 0.7,
+     'Token Input  xt in R^300',
+     fc='#161b22', ec=BLUE, tc=BLUE, fs=10)
+arr(ax, 5, 12.2, 11.85)
 
-# Level 4 — Sub-Galaxy
-box(ax, 0.3, 16.8, 9.4, 1.2,
-    'LEVEL 4 — Sub-Galaxy',
-    'Document clusters · inter-cluster gravity waves · beta=0.1 fusion',
-    color='#064e3b', tc='#a7f3d0', fs=10)
-arrow(ax, 5, 16.8, 5, 16.1)
+# POS tagger
+rbox(ax, 1.5, 11.1, 7, 0.65,
+     'spaCy POS Tagger',
+     'SUBJ · VERB · OBJ · PREP · CONJ · ADJ · ADV · DET',
+     fc='#2d1b00', ec=ORANGE, tc=ORANGE, fs=9)
+arr(ax, 5, 11.1, 10.75)
 
-# Level 3 — Multi-Solar System
-box(ax, 0.3, 15.1, 9.4, 1.2,
-    'LEVEL 3 — Multi-Solar System',
-    'One document · paragraphs -> solar systems · gravitational waves',
-    color='#7c2d12', tc='#fed7aa', fs=10)
-arrow(ax, 5, 15.1, 5, 14.4)
+# Layer stack outline
+ax.add_patch(FancyBboxPatch(
+    (0.4, 3.5), 9.2, 7.1,
+    boxstyle="round,pad=0.2",
+    facecolor='#0d1f3c',
+    edgecolor=BLUE, linewidth=1.5,
+    alpha=0.4, zorder=1
+))
+ax.text(5, 10.5, '8-Layer Processing Stack',
+        ha='center', color=BLUE,
+        fontsize=9, fontweight='bold', zorder=4)
 
-# Level 2 — Solar System (8 layers)
-level2 = FancyBboxPatch((0.3, 6.8), 9.4, 7.8,
-                         boxstyle="round,pad=0.15",
-                         facecolor='#0d419d',
-                         edgecolor='#58a6ff',
-                         linewidth=2, alpha=0.25)
-ax.add_patch(level2)
-ax.text(5, 14.2, 'LEVEL 2 — Solar System (8-Layer Stack)',
-        ha='center', va='center',
-        color='#58a6ff', fontsize=10, fontweight='bold')
-
-layers = [
-    ('L1', 'POS Detection + Raw Slot Fill',          '#1f6feb'),
-    ('L2', 'Context Window Correction',               '#1f6feb'),
-    ('L3', 'Spawn Controller — CONJ Detection',       '#7c3aed'),
-    ('L4', 'Orbital Link Encoder',                    '#7c3aed'),
-    ('L5', 'Solar Spring Unified Field Attention',    '#047857'),
-    ('L6', 'Pronoun Resolution — Orbital Walk',       '#b45309'),
-    ('L7', 'Relation Encoder  S x V x O',             '#9d174d'),
-    ('L8', 'Flatten + Project -> Context Vector Rd',  '#1f6feb'),
+# 8 layers
+LAYERS = [
+    ('L1', 'POS Slot Fill',
+     'Write token into correct ring slot', '#1f3d6e', BLUE),
+    ('L2', 'Context Correction',
+     'Fix slot based on surrounding context', '#1f3d6e', BLUE),
+    ('L3', 'Spawn Controller',
+     'CONJ detected -> spawn child ring', '#3d1f6e', PURPLE),
+    ('L4', 'Orbital Link Encoder',
+     'Connect parent -> child ring via gravity', '#3d1f6e', PURPLE),
+    ('L5', 'Solar Spring Attention',
+     'F = G_micro + G_macro + F_spring + F_bh', '#0d3d2e', GREEN),
+    ('L6', 'Pronoun Resolution',
+     'Orbital walk: Pluto -> antecedent ring', '#3d2a0d', ORANGE),
+    ('L7', 'Relation Encoder',
+     'Encode S x V x O triple', '#3d0d1f', RED),
+    ('L8', 'Output Projection',
+     'Flatten rings -> context vector c in R^d', '#1f3d6e', BLUE),
 ]
-for i, (ln, ld, lc) in enumerate(layers):
-    y = 13.6 - i * 0.84
-    box(ax, 0.6, y, 8.8, 0.74, f'{ln}  {ld}',
-        color=lc, tc='white', alpha=0.85, fs=8)
+
+for i, (num, name, desc, fc, ec) in enumerate(LAYERS):
+    y = 10.0 - i * 0.82
+    rbox(ax, 0.7, y, 8.6, 0.70,
+         f'{num}  {name}', desc,
+         fc=fc, ec=ec, tc=WHITE, fs=8.5)
     if i < 7:
-        arrow(ax, 5, y, 5, y-0.1)
+        arr(ax, 5, y, y - 0.12, c=ec)
 
-arrow(ax, 5, 6.8, 5, 6.2)
+arr(ax, 5, 3.5, 3.2)
 
-# Level 1 — Sub-planet
-box(ax, 0.3, 5.2, 9.4, 1.2,
-    'LEVEL 1 — Sub-Planet (Micro-Worker)',
-    'Animacy · Case · Size detected simultaneously per token',
-    color='#92400e', tc='#fde68a', fs=10)
+# Output
+rbox(ax, 1.5, 2.5, 7, 0.65,
+     'Context Vector  c in R^300',
+     'Fixed size · Same shape regardless of sentence length',
+     fc='#0d3d2e', ec=GREEN, tc=GREEN, fs=9)
 
-# Spring equation at bottom
-ax.text(5, 4.5,
-        'F(i,j) = G_micro + G_macro + F_spring + F_bh + F_ns + F_cp - F_cf',
-        ha='center', color='#58a6ff', fontsize=8,
-        fontfamily='monospace',
-        bbox=dict(boxstyle='round', facecolor='#161b22',
-                  edgecolor='#30363d'))
-
-# Results
-box(ax, 0.3, 0.3, 9.4, 3.8,
-    '',
-    color='#0d1117', tc='white', alpha=1.0)
+# Results strip
+ax.add_patch(FancyBboxPatch(
+    (0.4, 0.15), 9.2, 2.1,
+    boxstyle="round,pad=0.12",
+    facecolor='#161b22', edgecolor=GOLD,
+    linewidth=1.5, zorder=3
+))
+ax.text(5, 2.05, 'Benchmark Results',
+        ha='center', color=GOLD,
+        fontsize=9, fontweight='bold', zorder=4)
 
 results = [
-    ('Winograd Schema',  '80.7%',     'BERT 70%',   '+10.7%', '#ffd700'),
-    ('Pronoun Direct',   '76.7%',     'BERT 70%',   '+6.7%',  '#34d399'),
-    ('Nested Depth 4',   '50.0%',     'BERT 38%',   '+12%',   '#34d399'),
-    ('Context Window',   'unlimited', 'BERT 17',    '+inf',   '#34d399'),
-    ('Memory',           '27MB',      'BERT 418MB', '15x',    '#34d399'),
+    ('Winograd Schema',   '80.7%', 'BERT ~70%',   '+10.7%'),
+    ('Pronoun Direct',    '76.7%', 'BERT ~70%',   '+6.7%'),
+    ('Nested Depth 4',    '50.0%', 'BERT ~38%',   '+12%'),
+    ('Memory',            '27MB',  'BERT 418MB',  '15x less'),
+    ('Context Window',    'inf',   'BERT 512 tok','unlimited'),
 ]
-ax.text(5, 4.0, 'KEY RESULTS', ha='center',
-        color='white', fontsize=9, fontweight='bold')
-for i, (task, sr, bert, delta, c) in enumerate(results):
-    y = 3.5 - i * 0.58
-    ax.text(0.6, y, task, color='#94a3b8', fontsize=7)
-    ax.text(4.2, y, sr,   color=c, fontsize=7, fontweight='bold')
-    ax.text(6.0, y, bert, color='#64748b', fontsize=7)
-    ax.text(8.2, y, delta,color=c, fontsize=7, fontweight='bold')
+for i, (task, sr, bert, gain) in enumerate(results):
+    y = 1.72 - i * 0.30
+    ax.text(0.8,  y, task, color=GRAY,
+            fontsize=7, va='center', zorder=4)
+    ax.text(4.3,  y, sr,   color=GREEN,
+            fontsize=7, va='center',
+            fontweight='bold', zorder=4)
+    ax.text(6.0,  y, bert, color=GRAY,
+            fontsize=7, va='center', zorder=4)
+    ax.text(8.3,  y, gain, color=GOLD,
+            fontsize=7, va='center',
+            fontweight='bold', zorder=4)
 
-# ─── RIGHT: Physics Equations ──────────────────────────────
-ax2 = axes[1]
-ax2.set_facecolor('#0d1117')
-ax2.set_xlim(0, 10)
-ax2.set_ylim(0, 22)
-ax2.axis('off')
-ax2.set_title('Solar Ring Memory — Physics & Math',
-              color='white', fontsize=14, fontweight='bold', pad=12)
-
-sections = [
-    (20.0, 'Solar Spring Unified Field', '#047857',
-     ['F(i,j) = G_micro + G_macro + F_spring + F_bh + F_ns',
-      'G_micro = G_k x mi x mj / r2_slot',
-      'G_macro = G_O x mi x mj / r2_orbital',
-      'F_spring = k x |pos_i - pos_j|  <- grows with distance',
-      'F_bh = -G_bh / (conf - horizon)^2']),
-    (16.8, 'Isotope Decay (POS half-life)', '#b45309',
-     ['conf(t) = conf(0) x e^(-lambda_pos x t)',
-      'lambda_SUBJ = 0.005  half-life = 138 tokens',
-      'lambda_VERB = 0.030  half-life = 23 tokens',
-      'lambda_DET  = 0.350  half-life = 2 tokens',
-      'Nouns persist · Articles ejected instantly']),
-    (13.6, 'Neutron Star + Centripetal/Centrifugal', '#7c3aed',
-     ['F_ns = G_ns x (1/conf) x mi x mj / r^2',
-      'F_centripetal = m x v^2 / r  (keeps concept in orbit)',
-      'F_centrifugal = -m x w^2 x r  (ejects low-mass)',
-      'Lagrange point r* = (2G/k)^(1/3)',
-      'Maximum attraction at Lagrange distance']),
-    (10.4, 'Sun State + Galactic Core', '#1f6feb',
-     ['Sun(t+1) = (1-a)·Sun(t) + a·sum(Planet slots)',
-      'alpha = 0.3  (sentence-level fusion rate)',
-      'GalacticCore(t+1) = (1-b)·Core(t) + b·Sun',
-      'beta = 0.1  (document-level, very slow)',
-      'Sub-galaxy gravity = G x sim(i,core) x sim(j,core)']),
-    (7.2, 'Multiverse Parallelism', '#9d174d',
-     ['Spawn when: token in AMBIGUOUS_WORDS',
-      'P(universe_k) = softmax(Sun_k · context / sqrt(d))',
-      'Collapse when: max(P) > 0.80',
-      'Both universes run in parallel until collapse',
-      'Like quantum superposition -> observation']),
-    (4.0, 'Black Hole / White Hole', '#374151',
-     ['Black hole: conf < EVENT_HORIZON (0.1) -> collapse',
-      'Hawking radiation: ring_state -> Sun State (a=0.3)',
-      'White hole: orphan pronoun -> spawn new ring',
-      'Wormhole: destroyed info reappears next paragraph',
-      'Neutron star: collapsed ring still exerts gravity']),
-]
-
-for (y_start, title, color, lines) in sections:
-    box(ax2, 0.3, y_start-1.0, 9.4, 0.65,
-        title, color=color, tc='white', fs=9)
-    for i, line in enumerate(lines):
-        ax2.text(0.6, y_start-1.55-i*0.46, line,
-                 color='#e2e8f0', fontsize=7,
-                 fontfamily='monospace')
-
-# Hierarchy ladder on right
-ax2.text(5, 2.8, 'COMPLETE HIERARCHY', ha='center',
-         color='#ffd700', fontsize=10, fontweight='bold')
-hierarchy = [
-    ('Multiverse',    'parallel ambiguous interpretations', '#7c3aed'),
-    ('Galaxy',        'all documents on same topic',        '#1e3a5f'),
-    ('Sub-Galaxy',    'document clusters',                  '#064e3b'),
-    ('Multi-Solar',   'one document / conversation',        '#7c2d12'),
-    ('Solar System',  'one sentence / clause group',        '#1f6feb'),
-    ('Sub-Planet',    'animacy · case · size slots',        '#92400e'),
-]
-for i, (name, desc, c) in enumerate(hierarchy):
-    y = 2.3 - i * 0.38
-    ax2.add_patch(FancyBboxPatch(
-        (0.4, y-0.15), 9.2, 0.30,
-        boxstyle="round,pad=0.05",
-        facecolor=c, edgecolor='none', alpha=0.7
-    ))
-    ax2.text(1.0, y+0.0, name, color='white',
-             fontsize=7, fontweight='bold', va='center')
-    ax2.text(4.2, y+0.0, desc, color='#cbd5e1',
-             fontsize=6, va='center')
-
-plt.tight_layout(pad=1.5)
-plt.savefig('docs/architecture.png', dpi=150,
-            bbox_inches='tight', facecolor='#0d1117')
-print("Saved docs/architecture.png")
+plt.tight_layout(pad=0.5)
+plt.savefig('docs/architecture_layers.png',
+            dpi=150, bbox_inches='tight',
+            facecolor=BG)
 plt.close()
+print("Saved docs/architecture_layers.png")
+
+# ════════════════════════════════════════════
+# FIGURE 2 — Ring Hierarchy (orbital diagram)
+# ════════════════════════════════════════════
+fig2, ax2 = plt.subplots(figsize=(12, 14))
+fig2.patch.set_facecolor(BG)
+ax2.set_facecolor(BG)
+ax2.set_xlim(-7, 7)
+ax2.set_ylim(-7, 8)
+ax2.set_aspect('equal')
+ax2.axis('off')
+
+ax2.text(0, 7.6, 'Solar Ring Memory',
+         ha='center', color=WHITE,
+         fontsize=16, fontweight='bold')
+ax2.text(0, 7.1, 'Ring Hierarchy — Orbital Structure',
+         ha='center', color=GRAY, fontsize=11)
+
+# ── Sun ──
+sun_c = Circle((0,0), 1.1,
+               color='#f59e0b', alpha=0.95, zorder=6)
+ax2.add_patch(sun_c)
+ax2.text(0,  0.22, 'SUN', ha='center', va='center',
+         color='#1a1a2e', fontsize=11,
+         fontweight='bold', zorder=7)
+ax2.text(0, -0.22, 'Main Clause', ha='center', va='center',
+         color='#1a1a2e', fontsize=7, zorder=7)
+
+# Sun pole labels
+ax2.text( 0,  1.4, 'SUBJ: John',
+          ha='center', color='#34d399',
+          fontsize=8, fontweight='bold')
+ax2.text( 0, -1.5, 'OBJ: Mary',
+          ha='center', color='#f87171',
+          fontsize=8, fontweight='bold')
+ax2.text(-1.3, 0.1, 'VERB\ntold',
+          ha='center', color='#a78bfa', fontsize=7)
+ax2.text( 1.3, 0.1, 'CONJ\nthat',
+          ha='center', color='#94a3b8', fontsize=7)
+
+# ── Planet 1 orbit ──
+th = np.linspace(0, 2*np.pi, 300)
+ax2.plot(3.0*np.cos(th), 3.0*np.sin(th),
+         color=BLUE, lw=1.2, ls='--', alpha=0.4, zorder=2)
+
+# Planet 1
+p1 = Circle((2.6, 1.6), 0.82,
+             color='#1f4e79', alpha=0.95, zorder=6)
+ax2.add_patch(p1)
+ax2.text(2.6, 1.72, 'PLANET 1', ha='center', va='center',
+         color=WHITE, fontsize=7, fontweight='bold', zorder=7)
+ax2.text(2.6, 1.42, 'depth = 1', ha='center', va='center',
+         color='#93c5fd', fontsize=6, zorder=7)
+
+ax2.text(3.7, 2.7, 'SUBJ: cat',
+         ha='center', color='#34d399',
+         fontsize=7, fontweight='bold')
+ax2.text(3.7, 0.5, 'OBJ: dog',
+         ha='center', color='#f87171',
+         fontsize=7, fontweight='bold')
+
+# ── Planet 2 orbit (same) ──
+p2 = Circle((-2.6, 1.6), 0.82,
+             color='#4c1d95', alpha=0.95, zorder=6)
+ax2.add_patch(p2)
+ax2.text(-2.6, 1.72, 'PLANET 2', ha='center', va='center',
+         color=WHITE, fontsize=7, fontweight='bold', zorder=7)
+ax2.text(-2.6, 1.42, 'depth = 1', ha='center', va='center',
+         color='#c4b5fd', fontsize=6, zorder=7)
+ax2.text(-3.7, 2.7, 'SUBJ: she',
+         ha='center', color='#34d399',
+         fontsize=7, fontweight='bold')
+ax2.text(-3.7, 0.5, 'OBJ: it',
+         ha='center', color='#f87171',
+         fontsize=7, fontweight='bold')
+
+# ── Moon orbit around Planet 1 ──
+cx, cy = 2.6, 1.6
+ax2.plot(cx+1.5*np.cos(th), cy+1.5*np.sin(th),
+         color=ORANGE, lw=1.0, ls=':', alpha=0.4, zorder=2)
+
+moon = Circle((3.8, 2.9), 0.52,
+              color='#7c2d12', alpha=0.95, zorder=6)
+ax2.add_patch(moon)
+ax2.text(3.8, 2.92, 'MOON', ha='center', va='center',
+         color=WHITE, fontsize=6, fontweight='bold', zorder=7)
+ax2.text(3.8, 2.68, 'depth=2', ha='center', va='center',
+         color='#fed7aa', fontsize=5, zorder=7)
+
+# ── Pluto — pronoun ──
+ax2.plot(5.0*np.cos(th)-1.2, 2.2*np.sin(th),
+         color='#4b5563', lw=0.8, ls=':',
+         alpha=0.35, zorder=2)
+pluto = Circle((3.8, 0.0), 0.42,
+               color='#1f2937', alpha=0.95, zorder=6)
+ax2.add_patch(pluto)
+ax2.add_patch(Circle((3.8, 0.0), 0.42,
+                      fill=False, color='#4b5563',
+                      lw=1.5, zorder=7))
+ax2.text(3.8,  0.08, 'it', ha='center', va='center',
+         color='#9ca3af', fontsize=9,
+         fontweight='bold', zorder=8)
+ax2.text(3.8, -0.18, 'Pluto', ha='center', va='center',
+         color='#6b7280', fontsize=5, zorder=8)
+ax2.text(3.8, -0.55, 'e=0.85', ha='center',
+         color='#4b5563', fontsize=6, zorder=4)
+
+# ── Spring force arrow (pronoun -> antecedent) ──
+ax2.annotate('',
+    xy=(0, 1.2), xytext=(3.4, 0.1),
+    arrowprops=dict(arrowstyle='->',
+                   color=GOLD, lw=2.2,
+                   connectionstyle='arc3,rad=-0.35'),
+    zorder=8)
+ax2.text(1.9, 0.3, 'Spring\nforce', ha='center',
+         color=GOLD, fontsize=7, fontweight='bold')
+
+# ── Conjunction labels on orbits ──
+ax2.text( 1.3, -2.3, '"that"', ha='center',
+          color='#fbbf24', fontsize=8, fontstyle='italic')
+ax2.text(-1.3, -2.3, '"because"', ha='center',
+          color='#fbbf24', fontsize=8, fontstyle='italic')
+ax2.text( 4.3,  1.6, '"which"',  ha='center',
+          color='#fb923c', fontsize=7, fontstyle='italic')
+
+# ── Black hole ──
+bh = Circle((-4.0, -2.5), 0.5,
+             color='#000000', alpha=1.0, zorder=6)
+ax2.add_patch(bh)
+ax2.add_patch(Circle((-4.0, -2.5), 0.7,
+                      fill=False, color='#f59e0b',
+                      lw=2.0, alpha=0.7, zorder=7))
+ax2.text(-4.0, -2.5, 'X', ha='center', va='center',
+         color='#f59e0b', fontsize=12,
+         fontweight='bold', zorder=8)
+ax2.text(-4.0, -3.4, 'Black Hole', ha='center',
+         color='#f59e0b', fontsize=7, fontweight='bold')
+ax2.text(-4.0, -3.75, 'conf < 0.10 -> collapse', ha='center',
+         color=GRAY, fontsize=6)
+ax2.text(-4.0, -4.05, 'Hawking -> Sun State', ha='center',
+         color=GRAY, fontsize=6)
+
+# ── White hole ──
+wh = Circle((4.0, -2.5), 0.5,
+             color='#dbeafe', alpha=0.95, zorder=6)
+ax2.add_patch(wh)
+ax2.text(4.0, -2.5, '+', ha='center', va='center',
+         color=BLUE, fontsize=16,
+         fontweight='bold', zorder=7)
+ax2.text(4.0, -3.4, 'White Hole', ha='center',
+         color=BLUE, fontsize=7, fontweight='bold')
+ax2.text(4.0, -3.75, 'Orphan pronoun -> spawn', ha='center',
+         color=GRAY, fontsize=6)
+ax2.text(4.0, -4.05, 'Seeded from Sun State', ha='center',
+         color=GRAY, fontsize=6)
+
+# Wormhole arrow between BH and WH
+ax2.annotate('',
+    xy=(3.3, -2.5), xytext=(-3.3, -2.5),
+    arrowprops=dict(arrowstyle='->', color=PURPLE,
+                   lw=1.5, connectionstyle='arc3,rad=-0.3'),
+    zorder=8)
+ax2.text(0, -3.1, 'Wormhole', ha='center',
+         color=PURPLE, fontsize=7, fontweight='bold')
+
+# ── 6-level hierarchy strip at bottom ──
+levels = [
+    ('Multiverse',   'parallel ambiguous interpretations', '#4c1d95'),
+    ('Galaxy',       'all documents on same topic',        '#1e3a5f'),
+    ('Sub-Galaxy',   'document clusters · beta=0.1 fusion','#064e3b'),
+    ('Multi-Solar',  'one document · gravity waves',       '#7c2d12'),
+    ('Solar System', 'one sentence · sun+planets+moons',   '#1f3d6e'),
+    ('Sub-Planet',   'animacy · case · size per token',    '#3d2a0d'),
+]
+ax2.text(0, -4.7, 'Complete 6-Level Hierarchy',
+         ha='center', color=GOLD,
+         fontsize=9, fontweight='bold')
+for i, (name, desc, fc) in enumerate(levels):
+    y = -5.1 - i*0.38
+    ax2.add_patch(FancyBboxPatch(
+        (-6.5, y-0.16), 13, 0.30,
+        boxstyle="round,pad=0.04",
+        facecolor=fc, edgecolor='none',
+        alpha=0.75, zorder=3
+    ))
+    ax2.text(-6.2, y+0.0, name, color=WHITE,
+             fontsize=7, fontweight='bold',
+             va='center', zorder=4)
+    ax2.text(-2.5, y+0.0, desc, color='#cbd5e1',
+             fontsize=6, va='center', zorder=4)
+
+# ── Legend ──
+legend_items = [
+    (mpatches.Patch(color='#f59e0b'), 'Sun — main clause'),
+    (mpatches.Patch(color='#1f4e79'), 'Planet — nested (depth 1)'),
+    (mpatches.Patch(color='#7c2d12'), 'Moon — deep nested (depth 2)'),
+    (mpatches.Patch(color='#1f2937'), 'Pluto — pronoun (e=0.85)'),
+    (Line2D([0],[0],color='#34d399',lw=2), 'SUBJ pole (protected)'),
+    (Line2D([0],[0],color='#f87171',lw=2), 'OBJ pole (protected)'),
+    (Line2D([0],[0],color=GOLD,lw=2),      'Spring force'),
+    (Line2D([0],[0],color=PURPLE,lw=2),    'Wormhole'),
+]
+ax2.legend(
+    [h for h,_ in legend_items],
+    [l for _,l in legend_items],
+    loc='upper left',
+    facecolor='#161b22', edgecolor=BORDER,
+    labelcolor=WHITE, fontsize=6.5,
+    framealpha=0.9, ncol=2
+)
+
+plt.tight_layout(pad=0.5)
+plt.savefig('docs/architecture_rings.png',
+            dpi=150, bbox_inches='tight',
+            facecolor=BG)
+plt.close()
+print("Saved docs/architecture_rings.png")
+
+# ════════════════════════════════════════════
+# Combine side by side into architecture.png
+# ════════════════════════════════════════════
+from PIL import Image
+img1 = Image.open('docs/architecture_layers.png')
+img2 = Image.open('docs/architecture_rings.png')
+
+h = max(img1.height, img2.height)
+
+def pad(img, target_h, bg=(13, 17, 23)):
+    if img.height == target_h:
+        return img
+    new = Image.new('RGB', (img.width, target_h), bg)
+    new.paste(img, (0, (target_h - img.height) // 2))
+    return new
+
+img1 = pad(img1, h)
+img2 = pad(img2, h)
+
+combined = Image.new('RGB', (img1.width + img2.width, h),
+                     (13, 17, 23))
+combined.paste(img1, (0, 0))
+combined.paste(img2, (img1.width, 0))
+combined.save('docs/architecture.png')
+print("Saved docs/architecture.png (combined)")
