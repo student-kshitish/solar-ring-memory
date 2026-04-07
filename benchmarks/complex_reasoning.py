@@ -36,20 +36,20 @@ def extract_nouns(text: str) -> list:
     words = [clean(w) for w in text.split()]
     return [w for w in words
             if w not in STOPWORDS
-            and len(w) > 2
+            and len(w) > 0
             and w.isalpha()]
 
 def find_noun_after(words: list, idx: int) -> str:
     """Find first noun after position idx."""
     for w in words[idx+1:]:
-        if w not in STOPWORDS and len(w) > 2 and w.isalpha():
+        if w not in STOPWORDS and len(w) > 0 and w.isalpha():
             return w
     return ''
 
 def find_noun_before(words: list, idx: int) -> str:
     """Find last noun before position idx."""
     for w in reversed(words[:idx]):
-        if w not in STOPWORDS and len(w) > 2 and w.isalpha():
+        if w not in STOPWORDS and len(w) > 0 and w.isalpha():
             return w
     return ''
 
@@ -292,7 +292,11 @@ MULTIHOP_DATA = [
 # ═══════════════════════════════════════════════════════
 
 def clean(s):
-    return s.lower().rstrip('.,!?;:')
+    stripped = s.rstrip('.,!?;:')
+    # Preserve single uppercase letters as entity labels (A, B, C, D)
+    if len(stripped) == 1 and stripped.isupper():
+        return stripped
+    return stripped.lower()
 
 
 def extract_causal_chain(story: str,
@@ -383,23 +387,23 @@ def extract_spatial(story: str, question: str) -> str:
                      'top','bottom','front','behind'):
 
                 # Find entity before: prefer color as identifier
+                GENERIC = {'left','right','above','below',
+                           'ball','box','cup','item'}
                 obj1 = ''
                 for j in range(i-1, -1, -1):
                     if words[j] in COLORS:
                         obj1 = words[j]
                         break
                     elif (words[j] not in STOPWORDS
-                          and len(words[j]) > 2
+                          and len(words[j]) > 0
                           and words[j].isalpha()
-                          and words[j] not in
-                          ('left','right','above','below',
-                           'ball','box','cup','item')):
+                          and words[j] not in GENERIC):
                         obj1 = words[j]
                         break
                 if not obj1:
                     obj1 = find_noun_before(words, i)
 
-                # Find entity after: skip 'of the' pattern
+                # Find entity after: skip 'of the' and generic nouns
                 obj2 = ''
                 j = i + 1
                 while j < len(words):
@@ -410,8 +414,9 @@ def extract_spatial(story: str, question: str) -> str:
                         obj2 = words[j]
                         break
                     elif (words[j] not in STOPWORDS
-                          and len(words[j]) > 2
-                          and words[j].isalpha()):
+                          and len(words[j]) > 0
+                          and words[j].isalpha()
+                          and words[j] not in GENERIC):
                         obj2 = words[j]
                         break
                     j += 1
@@ -502,6 +507,28 @@ def extract_spatial(story: str, question: str) -> str:
     return list(positions.keys())[0]
 
 
+def get_sentence_subject(words: list, verb_idx: int) -> str:
+    """Get subject = first noun before the temporal keyword."""
+    VERBS = {'ate','slept','left','arrived','went','came',
+             'ran','walked','worked','studied','happened',
+             'started','ended','finished','began','lasted',
+             'took','made','did','got','said','told'}
+    # Find last verb before verb_idx; subject is first noun before that verb
+    for i in range(verb_idx-1, -1, -1):
+        if words[i] in VERBS:
+            for j in range(i):
+                if (words[j] not in STOPWORDS
+                    and words[j].isalpha()
+                    and words[j] not in VERBS):
+                    return words[j]
+            break
+    # Fallback: first non-stop word before verb_idx
+    for w in words[:verb_idx]:
+        if w not in STOPWORDS and w.isalpha():
+            return w
+    return ''
+
+
 def extract_temporal(story: str, question: str) -> str:
     sentences = [s.strip() for s in story.split('.')
                  if s.strip()]
@@ -526,7 +553,9 @@ def extract_temporal(story: str, question: str) -> str:
 
         for i, w in enumerate(words):
             if w in BEFORE:
-                subj = find_noun_before(words, i)
+                subj = get_sentence_subject(words, i)
+                if not subj:
+                    subj = find_noun_before(words, i)
                 obj  = find_noun_after(words, i)
                 if subj and obj and subj != obj:
                     # subj comes BEFORE obj in time
@@ -540,7 +569,9 @@ def extract_temporal(story: str, question: str) -> str:
                         order.append(obj)
 
             elif w in AFTER:
-                subj = find_noun_before(words, i)
+                subj = get_sentence_subject(words, i)
+                if not subj:
+                    subj = find_noun_before(words, i)
                 obj  = find_noun_after(words, i)
                 if subj and obj and subj != obj:
                     # subj comes AFTER obj in time
