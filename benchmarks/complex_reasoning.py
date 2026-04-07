@@ -26,6 +26,8 @@ STOPWORDS = {
     'wet','dry','hot','cold','late','early','long',
     'why','what','where','when','who','how','which',
     'did','does','got','get','make','made','let',
+    # negation/function
+    'no','not','nor','never','out','off','up','down',
 }
 
 COLORS = {'red','blue','green','yellow','orange','purple',
@@ -324,6 +326,21 @@ def extract_causal_chain(story: str,
                                 if w not in STOPWORDS
                                 and w.isalpha()]
 
+                CAUSAL_VERBS = {
+                    'ran','won','got','had','felt','made',
+                    'died','fell','came','went','ate','said',
+                    'told','gave','took','put','set','lost',
+                    'hit','spread','broke','skidded','spoiled',
+                    'stopped','started','formed','evaporated',
+                    'heated','polluted','weakened','overslept',
+                    'forgot','missed','caught','flooded',
+                    'damaged','failed','barked','slipped',
+                }
+                cause_nouns = [w for w in cause_nouns
+                               if w not in CAUSAL_VERBS]
+                effect_nouns = [w for w in effect_nouns
+                                if w not in CAUSAL_VERBS]
+
                 if cause_nouns and effect_nouns:
                     cause = cause_nouns[0]
                     for eff in effect_nouns:
@@ -352,24 +369,35 @@ def extract_causal_chain(story: str,
                 current = noun_cause[current]
             return current
 
-    # Try partial matches
+    # Direct value match — focus IS the cause
+    for focus in q_nouns:
+        if focus in noun_cause.values():
+            return focus
+
+    # Partial key match — only if no direct match
+    best_match = None
     for focus in q_nouns:
         for key in noun_cause:
             if focus in key or key in focus:
-                current = noun_cause[key]
-                visited = {key}
-                while current in noun_cause and current not in visited:
-                    visited.add(current)
-                    current = noun_cause[current]
-                return current
+                best_match = key
+                break
+        if best_match:
+            break
+
+    if best_match:
+        current = noun_cause[best_match]
+        visited = {best_match}
+        while current in noun_cause and current not in visited:
+            visited.add(current)
+            current = noun_cause[current]
+        return current
 
     if noun_cause:
-        # Return deepest root (value not in any key)
+        # Deepest root = value never appears as a key
         roots = [v for v in noun_cause.values()
                  if v not in noun_cause]
         if roots:
-            return roots[0]
-        return list(noun_cause.values())[-1]
+            return roots[-1]
 
     return 'unknown'
 
