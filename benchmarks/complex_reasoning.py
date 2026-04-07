@@ -307,10 +307,6 @@ def extract_causal_chain(story: str,
     CAUSAL = {'because','due','caused','since',
               'therefore','so','hence','thus'}
 
-    # Build TWO maps:
-    # verb_cause: effect_verb → cause_noun
-    # noun_cause: effect_noun → cause_noun
-    verb_cause = {}
     noun_cause = {}
 
     for sent in sentences:
@@ -322,12 +318,10 @@ def extract_causal_chain(story: str,
 
                 cause_nouns = [w for w in after
                                if w not in STOPWORDS
-                               and len(w) > 2
                                and w.isalpha()]
 
                 effect_nouns = [w for w in before
                                 if w not in STOPWORDS
-                                and len(w) > 2
                                 and w.isalpha()]
 
                 if cause_nouns and effect_nouns:
@@ -335,7 +329,6 @@ def extract_causal_chain(story: str,
                     for eff in effect_nouns:
                         noun_cause[eff] = cause
 
-    # Find question focus — all content words
     Q_SKIP = {'why','what','where','when','who','how',
               'did','was','were','is','are','the','a',
               'an','happen','cause','make','made',
@@ -344,31 +337,40 @@ def extract_causal_chain(story: str,
     q_nouns = [w for w in q_words
                if w not in Q_SKIP
                and w not in STOPWORDS
-               and len(w) > 2
                and w.isalpha()]
 
     if not q_nouns:
         return 'unknown'
 
-    # Try each focus word in causal map
+    # Walk FULL chain to root for each focus word
     for focus in q_nouns:
         if focus in noun_cause:
             visited = set()
             current = focus
-            root = noun_cause[focus]
-            visited.add(current)
+            while current in noun_cause and current not in visited:
+                visited.add(current)
+                current = noun_cause[current]
+            return current
 
-            for _ in range(5):
-                if root in noun_cause and root not in visited:
-                    visited.add(root)
-                    root = noun_cause[root]
-                else:
-                    break
-            return root
+    # Try partial matches
+    for focus in q_nouns:
+        for key in noun_cause:
+            if focus in key or key in focus:
+                current = noun_cause[key]
+                visited = {key}
+                while current in noun_cause and current not in visited:
+                    visited.add(current)
+                    current = noun_cause[current]
+                return current
 
-    # Fallback: return first cause in map
     if noun_cause:
-        return list(noun_cause.values())[0]
+        # Return deepest root (value not in any key)
+        roots = [v for v in noun_cause.values()
+                 if v not in noun_cause]
+        if roots:
+            return roots[0]
+        return list(noun_cause.values())[-1]
+
     return 'unknown'
 
 
@@ -456,6 +458,35 @@ def extract_spatial(story: str, question: str) -> str:
     if 'last' in q or 'rightmost' in q:
         return max(positions, key=positions.get)
 
+    # "directly below/above X"
+    if 'directly' in q_words:
+        for obj in positions:
+            if obj in q:
+                ref = positions[obj]
+                if 'below' in q_words or 'under' in q_words:
+                    target = ref + 1
+                elif 'above' in q_words or 'over' in q_words:
+                    target = ref - 1
+                else:
+                    continue
+                for candidate, pos in positions.items():
+                    if pos == target and candidate != obj:
+                        return candidate
+
+    # "is X left/right/above of Y" → yes/no using entities in positions
+    if any(w in q_words for w in ('yes','no')) or (q_words and q_words[0] == 'is'):
+        q_entities = [w for w in q_words if w in positions]
+        if len(q_entities) >= 2:
+            a, b = q_entities[0], q_entities[1]
+            pa = positions[a]
+            pb = positions[b]
+            if 'left' in q_words:
+                return 'yes' if pa < pb else 'no'
+            if 'right' in q_words:
+                return 'yes' if pa > pb else 'no'
+            if 'above' in q_words:
+                return 'yes' if pa < pb else 'no'
+
     # "right of X" → find X then return X+1
     for obj in positions:
         if obj in q:
@@ -464,21 +495,8 @@ def extract_spatial(story: str, question: str) -> str:
                 if pos == target_pos:
                     return candidate
 
-    # yes/no questions
-    q_nouns = extract_nouns(question)
-    if 'yes' in q or 'no' in q or 'is' in q_words:
-        if len(q_nouns) >= 2:
-            a, b = q_nouns[0], q_nouns[1]
-            pa = positions.get(a, 0)
-            pb = positions.get(b, 0)
-            if 'left' in q:
-                return 'yes' if pa < pb else 'no'
-            if 'right' in q:
-                return 'yes' if pa > pb else 'no'
-            if 'above' in q:
-                return 'yes' if pa < pb else 'no'
-
     # "between X and Z" → find middle
+    q_nouns = extract_nouns(question)
     if 'between' in q_words:
         if len(q_nouns) >= 2:
             a, b = q_nouns[0], q_nouns[-1]
@@ -541,15 +559,44 @@ def extract_temporal(story: str, question: str) -> str:
     order = []
     durations = {}
 
+    DURATION_VERBS = {'lasted','took','takes','lasts',
+                      'spent','continued'}
+
     for sent in sentences:
         words = [clean(w) for w in sent.split()]
 
-        # Duration: look for number followed by unit
+        # Duration via verb: "meeting lasted 2 hours"
         for i, w in enumerate(words):
-            if w.isdigit() and i > 0:
-                entity = find_noun_before(words, i)
-                if entity and entity not in STOPWORDS:
-                    durations[entity] = int(w)
+            if w in DURATION_VERBS:
+                entity = ''
+                for j in range(i-1, -1, -1):
+                    if (words[j] not in STOPWORDS
+                        and words[j].isalpha()
+                        and words[j] not in DURATION_VERBS):
+                        entity = words[j]
+                        break
+                # Next digit = duration value
+                for j in range(i+1, len(words)):
+                    if words[j].isdigit():
+                        if entity:
+                            durations[entity] = int(words[j])
+                        break
+                else:
+                    # No digit — use insertion order as proxy
+                    if entity and entity not in durations:
+                        durations[entity] = len(durations)
+
+        # Comparative: "X lasts longer than Y"
+        if 'longer' in words or 'more' in words:
+            nouns_in_sent = [w for w in words
+                             if w not in STOPWORDS
+                             and w.isalpha()
+                             and w not in DURATION_VERBS
+                             and w not in ('longer','than',
+                                          'more','less')]
+            if len(nouns_in_sent) >= 2:
+                durations[nouns_in_sent[0]] = 100
+                durations[nouns_in_sent[1]] = 50
 
         for i, w in enumerate(words):
             if w in BEFORE:
