@@ -118,6 +118,26 @@ TASK3_DATA = [
      "Where is the key?", "garden"),
     ("Mary picked up the box. Mary went to the bedroom. Mary moved to the hallway.",
      "Where is the box?", "hallway"),
+    ("John picked up the milk. John went to the office. John moved to the hallway.",
+     "Where is the milk?", "hallway"),
+    ("Mary grabbed the pen. Mary moved to the bedroom. Mary went to the garden.",
+     "Where is the pen?", "garden"),
+    ("Sandra took the cup. Sandra went to the hallway. Sandra moved to the kitchen.",
+     "Where is the cup?", "kitchen"),
+    ("Daniel picked up the plate. Daniel moved to the kitchen. Daniel went to the office.",
+     "Where is the plate?", "office"),
+    ("John grabbed the bag. John went to the garden. John moved to the bedroom.",
+     "Where is the bag?", "bedroom"),
+    ("Mary took the key. Mary moved to the office. Mary went to the hallway.",
+     "Where is the key?", "hallway"),
+    ("Sandra picked up the toy. Sandra went to the bedroom. Sandra moved to the garden.",
+     "Where is the toy?", "garden"),
+    ("Daniel grabbed the box. Daniel moved to the hallway. Daniel went to the kitchen.",
+     "Where is the box?", "kitchen"),
+    ("John took the coin. John went to the kitchen. John moved to the office.",
+     "Where is the coin?", "office"),
+    ("Mary picked up the ring. Mary moved to the garden. Mary went to the bedroom.",
+     "Where is the ring?", "bedroom"),
 ]
 
 # ── Slot-reading evaluator ───────────────────────────────────
@@ -142,7 +162,7 @@ def extract_answer_rule_based(story: str,
     question_lower = question.lower()
 
     # Find who is being asked about
-    q_words = question_lower.split()
+    q_words = [w.rstrip('.,!?;:') for w in question_lower.split()]
     subject = None
     for w in q_words:
         if w in ('john','mary','sandra','daniel',
@@ -165,7 +185,7 @@ def extract_answer_rule_based(story: str,
     sentences = story.split('.')
 
     for sent in sentences:
-        sent_words = sent.lower().split()
+        sent_words = [w.rstrip('.,!?;:') for w in sent.lower().split()]
 
         # Check if this sentence is about our entity
         relevant = False
@@ -350,7 +370,7 @@ if __name__ == "__main__":
     answer_vocab = build_answer_vocab(all_data)
     print(f"  Answer vocabulary: {len(answer_vocab)} locations")
 
-    model = train_neural(all_data, answer_vocab, epochs=20)
+    model = train_neural(all_data, answer_vocab, epochs=30)
 
     test1 = TASK1_DATA[15:]
     test2 = TASK2_DATA[15:]
