@@ -303,44 +303,69 @@ def extract_causal_chain(story: str,
     CAUSAL = {'because','due','caused','since',
               'therefore','so','hence','thus'}
 
-    # Build causal map: effect_noun → cause_noun
-    causal_map = {}
+    # Build TWO maps:
+    # verb_cause: effect_verb → cause_noun
+    # noun_cause: effect_noun → cause_noun
+    verb_cause = {}
+    noun_cause = {}
+
     for sent in sentences:
         words = [clean(w) for w in sent.split()]
         for i, w in enumerate(words):
             if w in CAUSAL:
-                effect_noun = find_noun_before(words, i)
-                cause_noun  = find_noun_after(words, i)
-                if effect_noun and cause_noun:
-                    causal_map[effect_noun] = cause_noun
+                before = words[:i]
+                after  = words[i+1:]
 
-    # Remove question words and find the main subject
+                cause_nouns = [w for w in after
+                               if w not in STOPWORDS
+                               and len(w) > 2
+                               and w.isalpha()]
+
+                effect_nouns = [w for w in before
+                                if w not in STOPWORDS
+                                and len(w) > 2
+                                and w.isalpha()]
+
+                if cause_nouns and effect_nouns:
+                    cause = cause_nouns[0]
+                    for eff in effect_nouns:
+                        noun_cause[eff] = cause
+
+    # Find question focus — all content words
     Q_SKIP = {'why','what','where','when','who','how',
               'did','was','were','is','are','the','a',
-              'an','happen','cause','make','made','it',
-              'happened','caused','result'}
-    q_words_clean = [clean(w) for w in question.split()]
-    q_nouns = [w for w in q_words_clean
+              'an','happen','cause','make','made',
+              'happened','caused','result','get','got'}
+    q_words = [clean(w) for w in question.split()]
+    q_nouns = [w for w in q_words
                if w not in Q_SKIP
                and w not in STOPWORDS
                and len(w) > 2
                and w.isalpha()]
-    focus = q_nouns[0] if q_nouns else ''
 
-    # Walk backward to root cause
-    visited = set()
-    current = focus
-    root = focus
+    if not q_nouns:
+        return 'unknown'
 
-    for _ in range(5):
-        if current in causal_map and current not in visited:
+    # Try each focus word in causal map
+    for focus in q_nouns:
+        if focus in noun_cause:
+            visited = set()
+            current = focus
+            root = noun_cause[focus]
             visited.add(current)
-            root = causal_map[current]
-            current = root
-        else:
-            break
 
-    return root
+            for _ in range(5):
+                if root in noun_cause and root not in visited:
+                    visited.add(root)
+                    root = noun_cause[root]
+                else:
+                    break
+            return root
+
+    # Fallback: return first cause in map
+    if noun_cause:
+        return list(noun_cause.values())[0]
+    return 'unknown'
 
 
 def extract_spatial(story: str, question: str) -> str:
@@ -395,9 +420,14 @@ def extract_spatial(story: str, question: str) -> str:
                     if obj1 not in positions:
                         positions[obj1] = current_pos
                         current_pos += 1
-                    if w in ('left','above','front'):
+                    if w in ('left','front'):
                         positions[obj2] = positions[obj1] + 1
-                    elif w in ('right','below','behind'):
+                    elif w in ('right','behind'):
+                        positions[obj2] = positions[obj1] - 1
+                    elif w == 'above':
+                        # obj1 is higher (top), obj2 is lower (bottom)
+                        positions[obj2] = positions[obj1] + 1
+                    elif w == 'below':
                         positions[obj2] = positions[obj1] - 1
 
     if not positions:
@@ -410,9 +440,9 @@ def extract_spatial(story: str, question: str) -> str:
         return max(positions, key=positions.get)
     if 'leftmost' in q or 'left' in q and 'most' in q:
         return min(positions, key=positions.get)
-    if 'bottom' in q:
+    if 'bottom' in q or 'lowest' in q:
         return max(positions, key=positions.get)
-    if 'top' in q:
+    if 'top' in q or 'highest' in q:
         return min(positions, key=positions.get)
     if 'rightmost' in q:
         return max(positions, key=positions.get)
@@ -476,40 +506,50 @@ def extract_temporal(story: str, question: str) -> str:
     sentences = [s.strip() for s in story.split('.')
                  if s.strip()]
 
-    BEFORE = {'before','earlier','prior','first','ago'}
-    AFTER  = {'after','later','following','last','then'}
+    BEFORE = {'before','earlier','prior','first'}
+    AFTER  = {'after','later','following'}
     LONGER = {'longer','more','greater','larger'}
     SHORTER= {'shorter','less','fewer','smaller'}
 
-    order = []  # ordered list earliest→latest
-    durations = {}  # entity → duration value
+    order = []
+    durations = {}
 
     for sent in sentences:
         words = [clean(w) for w in sent.split()]
 
-        # Duration extraction: "X took N days/hours"
+        # Duration: look for number followed by unit
         for i, w in enumerate(words):
             if w.isdigit() and i > 0:
                 entity = find_noun_before(words, i)
                 if entity and entity not in STOPWORDS:
                     durations[entity] = int(w)
 
-        # Ordering extraction
         for i, w in enumerate(words):
             if w in BEFORE:
                 subj = find_noun_before(words, i)
                 obj  = find_noun_after(words, i)
-                if subj and obj:
+                if subj and obj and subj != obj:
+                    # subj comes BEFORE obj in time
                     if subj not in order:
-                        order.append(subj)
+                        if obj in order:
+                            idx = order.index(obj)
+                            order.insert(idx, subj)
+                        else:
+                            order.append(subj)
                     if obj not in order:
                         order.append(obj)
-            if w in AFTER:
+
+            elif w in AFTER:
                 subj = find_noun_before(words, i)
                 obj  = find_noun_after(words, i)
-                if subj and obj:
+                if subj and obj and subj != obj:
+                    # subj comes AFTER obj in time
                     if obj not in order:
-                        order.insert(0, obj)
+                        if subj in order:
+                            idx = order.index(subj)
+                            order.insert(idx, obj)
+                        else:
+                            order.insert(0, obj)
                     if subj not in order:
                         order.append(subj)
 
@@ -536,7 +576,18 @@ def extract_temporal(story: str, question: str) -> str:
     if 'third' in q_words:
         return order[2] if len(order) > 2 else order[-1]
 
-    return order[0]
+    # Who acted first/last from names
+    q_nouns = [w for w in q_words
+               if w not in STOPWORDS
+               and len(w) > 2 and w.isalpha()
+               and w not in ('first','last','who',
+                             'what','happened','acted')]
+    if q_nouns:
+        focus = q_nouns[0]
+        if focus in order:
+            return order[0] if 'first' in q else order[-1]
+
+    return order[0] if order else 'unknown'
 
 
 def extract_multihop(story: str, question: str) -> str:
