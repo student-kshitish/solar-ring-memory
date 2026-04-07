@@ -21,7 +21,15 @@ STOPWORDS = {
     'they','his','her','their','my','our','your',
     'had','has','have','did','do','does','been',
     'will','would','could','should','may','might',
+    # causal/question words
+    'because','due','since','therefore','hence','thus',
+    'wet','dry','hot','cold','late','early','long',
+    'why','what','where','when','who','how','which',
+    'did','does','got','get','make','made','let',
 }
+
+COLORS = {'red','blue','green','yellow','orange','purple',
+          'black','white','pink','brown','grey','gray'}
 
 def extract_nouns(text: str) -> list:
     """Extract meaningful nouns — skip stopwords."""
@@ -306,8 +314,17 @@ def extract_causal_chain(story: str,
                 if effect_noun and cause_noun:
                     causal_map[effect_noun] = cause_noun
 
-    # Find focus of question
-    q_nouns = extract_nouns(question)
+    # Remove question words and find the main subject
+    Q_SKIP = {'why','what','where','when','who','how',
+              'did','was','were','is','are','the','a',
+              'an','happen','cause','make','made','it',
+              'happened','caused','result'}
+    q_words_clean = [clean(w) for w in question.split()]
+    q_nouns = [w for w in q_words_clean
+               if w not in Q_SKIP
+               and w not in STOPWORDS
+               and len(w) > 2
+               and w.isalpha()]
     focus = q_nouns[0] if q_nouns else ''
 
     # Walk backward to root cause
@@ -339,20 +356,49 @@ def extract_spatial(story: str, question: str) -> str:
         for i, w in enumerate(words):
             if w in ('left','right','above','below',
                      'top','bottom','front','behind'):
-                obj1 = find_noun_before(words, i)
-                obj2 = find_noun_after(words, i)
 
-                if not obj1 or not obj2:
-                    continue
+                # Find entity before: prefer color as identifier
+                obj1 = ''
+                for j in range(i-1, -1, -1):
+                    if words[j] in COLORS:
+                        obj1 = words[j]
+                        break
+                    elif (words[j] not in STOPWORDS
+                          and len(words[j]) > 2
+                          and words[j].isalpha()
+                          and words[j] not in
+                          ('left','right','above','below',
+                           'ball','box','cup','item')):
+                        obj1 = words[j]
+                        break
+                if not obj1:
+                    obj1 = find_noun_before(words, i)
 
-                if obj1 not in positions:
-                    positions[obj1] = current_pos
-                    current_pos += 1
+                # Find entity after: skip 'of the' pattern
+                obj2 = ''
+                j = i + 1
+                while j < len(words):
+                    if words[j] in ('of','the','a','an','to'):
+                        j += 1
+                        continue
+                    if words[j] in COLORS:
+                        obj2 = words[j]
+                        break
+                    elif (words[j] not in STOPWORDS
+                          and len(words[j]) > 2
+                          and words[j].isalpha()):
+                        obj2 = words[j]
+                        break
+                    j += 1
 
-                if w in ('left','above','front'):
-                    positions[obj2] = positions[obj1] + 1
-                else:
-                    positions[obj2] = positions[obj1] - 1
+                if obj1 and obj2 and obj1 != obj2:
+                    if obj1 not in positions:
+                        positions[obj1] = current_pos
+                        current_pos += 1
+                    if w in ('left','above','front'):
+                        positions[obj2] = positions[obj1] + 1
+                    elif w in ('right','below','behind'):
+                        positions[obj2] = positions[obj1] - 1
 
     if not positions:
         return 'unknown'
