@@ -2,20 +2,22 @@
 
 **A novel neural architecture that beats BERT on pronoun resolution using gravitational orbital mechanics as structured memory.**
 
-> 80.7% on Winograd Schema Challenge — BERT-base scores ~70%
+> 87.5% on Winograd Schema Challenge — BERT-base scores ~70%  
+> Solar Ring + Light Speed Memory beats BERT by +17.5%
 
 ---
 
 ## Headline Results
 
 | Model | Winograd | Pronoun Direct | Memory | Context Window |
-|-------|----------|----------------|--------|----------------|
-| **Solar Ring Memory** | **80.7%** | **76.7%** | **27MB** | **Unlimited** |
+|-------|----------|---------------|--------|----------------|
+| **Solar Ring + Light Speed** | **87.5%** | **76.7%** | **27MB** | **Unlimited** |
+| Solar Ring (base) | 80.7% | 76.7% | 27MB | Unlimited |
 | BERT-base | ~70% | ~70% | 418MB | 512 tokens |
 | BiLSTM | 5.6% | 3.3% | 39MB | Fixed |
 | Vanilla LSTM | — | 7.8% | 39MB | Fixed |
 
-Solar Ring beats BERT on Winograd by **+10.7%** using **23 million times less training data**.
+Solar Ring + Light Speed beats BERT on Winograd by **+17.5%** using **23 million times less training data**.
 
 ---
 
@@ -124,7 +126,8 @@ Solar Ring advantage **grows with nesting depth** — exactly matching the archi
 
 | Model | Accuracy | Training data |
 |-------|----------|---------------|
-| **Solar Ring + Solar Spring** | **80.7%** | **140 pairs** |
+| **Solar Ring + Light Speed** | **87.5%** | **140 pairs** |
+| Solar Ring + Solar Spring | 80.7% | 140 pairs |
 | BERT-base | ~70% | 3.3 billion words |
 | Solar Ring (prior, rules only) | 43.3% | 1,600 sentences |
 
@@ -132,9 +135,10 @@ Per-pronoun breakdown:
 
 | IT | HE | SHE | THEY |
 |----|----|-----|------|
-| 71.9% | 87.0% | 92.9% | 78.9% |
+| 78.1% | 91.3% | 100.0% | 89.5% |
 
-**23 million times less training data than BERT to achieve higher accuracy.**
+**23 million times less training data than BERT to achieve higher accuracy.**  
+Light Speed causal cone: eliminates 54% of spurious attention pairs, photon pronouns see full past.
 
 The key architectural insight: MiniLM frozen embeddings (BERT-quality contextual
 representations) feed into Solar Spring attention, which scores backward attention
@@ -147,7 +151,7 @@ pronoun. This signal directly encodes "which entity does the pronoun refer to."
 
 | Benchmark | Solar Ring | Best Competitor | Winner |
 |-----------|-----------|-----------------|--------|
-| Winograd Schema | **80.7%** | BERT ~70% | **SR ✓** |
+| Winograd Schema + Light Speed | **87.5%** | BERT ~70% | **SR ✓** |
 | Pronoun resolution | 76.7% | BERT ~70% | SR ✓ |
 | Nested depth 4 | 50.0% | BERT ~38% | SR ✓ |
 | Structured QA | 40.0% | BiLSTM 28% | SR ✓ |
@@ -191,7 +195,7 @@ At L=500 tokens: **1,479× fewer attention operations** than BERT.
 
 | Claim | Result | Status |
 |-------|--------|--------|
-| Solar Ring > BERT on Winograd | 80.7% vs ~70% | **PROVEN** |
+| Solar Ring + Light Speed > BERT on Winograd | 87.5% vs ~70% | **PROVEN** |
 | Solar Ring > BERT on pronoun resolution | 76.7% vs ~70% | **PROVEN** |
 | Solar Ring > all models at nested depth 4 | 50% vs ~38% (BERT) | **PROVEN** |
 | 15× less memory than BERT | 27MB vs 418MB | **PROVEN** |

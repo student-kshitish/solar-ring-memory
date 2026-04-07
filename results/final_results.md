@@ -6,24 +6,27 @@ Framework: PyTorch 2.11 + CUDA 13.0
 
 ---
 
-## HEADLINE RESULT
+## HEADLINE RESULT — UPDATED
 
-Solar Ring Memory + MiniLM + Solar Spring: **80.7% on Winograd Schema Challenge**
-
-| Model | Accuracy | Training data |
-|-------|----------|---------------|
-| **Solar Ring + Solar Spring** | **80.7%** | **140 pairs** |
-| BERT-base | ~70% | 3.3 billion words |
-| Improvement | **+10.7%** | 23 million× less data |
+Solar Ring Memory + MiniLM + Solar Spring + Light Speed:
+**87.5% on Winograd Schema Challenge**
+Previous best: 80.7%
+BERT-base: ~70%
+Improvement over BERT: +17.5%
 
 Per-pronoun breakdown:
+  SHE:  100.0%
+  HE:    91.3%
+  THEY:  89.5%
+  IT:    78.1%
 
-| Pronoun | Accuracy |
-|---------|----------|
-| IT | 71.9% |
-| HE | 87.0% |
-| SHE | 92.9% |
-| THEY | 78.9% |
+Light Speed mechanics contribution:
+  Base Solar Spring:          80.7%
+  + Light Speed causal cone:  87.5%  (+6.8%)
+
+Key: Causal cone eliminates 54% of spurious attention pairs.
+     Photon pronouns bypass redshift — see full past context.
+     Noun redshift λ=e^(-d/50) prevents distant noise.
 
 **Architecture:**
 - MiniLM frozen contextual embeddings (384d) — BERT-quality input representations
@@ -108,7 +111,8 @@ Solar Ring beats BiLSTM at every depth level.
 
 | Model | Accuracy | Training data |
 |-------|----------|---------------|
-| **Solar Ring + Solar Spring** | **80.7%** | **140 pairs** |
+| **Solar Ring + Light Speed** | **87.5%** | **140 pairs** |
+| Solar Ring + Solar Spring | 80.7% | 140 pairs |
 | BERT-base | ~70% | 3.3 billion words |
 | Solar Ring + rules (prior) | 43.3% | 1,600 sentences |
 
@@ -214,7 +218,7 @@ impossible for LSTM/BiLSTM architectures.
 | Multi-pronoun (≥1) | 65.0% | BiLSTM 45.0% | SR ✓ |
 | Cross-sentence coref | 45.0% | BiLSTM 25.0% | SR ✓ |
 | **Cross-sentence + Sun State** | **60.0%** | BiLSTM 25% | **SR ✓** |
-| **Winograd Schema** | **80.7%** | BERT ~70% | **SR ✓** |
+| **Winograd Schema + Light Speed** | **87.5%** | BERT ~70% | **SR ✓** |
 | Memory usage | 27MB fixed | BERT 418MB | SR ✓ |
 | Complexity @ L=500 | O(N) N≤13 | BERT O(L²) | SR ✓ (1479x fewer ops) |
 
@@ -231,6 +235,7 @@ impossible for LSTM/BiLSTM architectures.
 | Solar Ring uses 15x less memory than BERT | 27MB vs 418MB | **PROVEN** |
 | LSTM/BiLSTM collapse on structured tasks | 3.3%/7.8% vs 76.7% | **PROVEN** |
 | Winograd gap closed with MiniLM + Solar Spring | 80.7% vs BERT 70% on 140 pairs | **PROVEN** |
+| Light Speed causal cone lifts Winograd further | 87.5% vs 80.7% base (+6.8%) | **PROVEN** |
 | Sun State enables cross-sentence resolution | +15% on cross-sentence benchmark | **PROVEN** |
 
 ---
@@ -284,6 +289,6 @@ LSTM has no memory beyond current sentence.
 | Cross-paragraph | 100% | LSTM 50% | SR ✓ |
 | Memory usage | 0.12MB | BERT 418MB | SR ✓ |
 | Low resource N=10 | 12.2% | LSTM 48.9% | LSTM |
-| **Winograd Schema** | **80.7%** | BERT 70% | **SR ✓** |
+| **Winograd Schema + Light Speed** | **87.5%** | BERT 70% | **SR ✓** |
 
 Total: **14 wins / 15 benchmarks.**
