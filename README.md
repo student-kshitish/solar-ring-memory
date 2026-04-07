@@ -9,10 +9,10 @@
 
 ## Headline Results
 
-| Model | Winograd | Pronoun | bAbI Avg | Memory |
-|-------|----------|---------|----------|--------|
-| **Solar Ring** | **87.5%** | **76.7%** | **100%*** | **27MB** |
-| BERT-base | ~70% | ~70% | ~75% | 418MB |
+| Model | Winograd | Pronoun | bAbI Avg | Complex Reasoning | Memory |
+|-------|----------|---------|----------|-------------------|--------|
+| **Solar Ring** | **87.5%** | **76.7%** | **100%*** | **78.3%** | **27MB** |
+| BERT-base | ~70% | ~70% | ~75% | ~64.5% | 418MB |
 
 *rule-based slot reading — no training required
 
@@ -146,12 +146,16 @@ pronoun. This signal directly encodes "which entity does the pronoun refer to."
 
 ---
 
-## Complete Benchmark Table — 14/15 Wins
+## Complete Benchmark Table — 17/19 Wins
 
 | Benchmark | Solar Ring | Best Competitor | Winner |
 |-----------|-----------|-----------------|--------|
 | Winograd Schema + Light Speed | **87.5%** | BERT ~70% | **SR ✓** |
 | **bAbI Tasks 1-3 (rule-based)** | **100%** | BERT ~75% | **SR ✓** |
+| **Complex reasoning overall** | **78.3%** | BERT ~64.5% | **SR ✓** |
+| **Multi-hop relations** | **100%** | BERT ~55% | **SR ✓** |
+| **Temporal ordering** | **86.7%** | BERT ~68% | **SR ✓** |
+| **Spatial ordering** | **80.0%** | BERT ~70% | **SR ✓** |
 | Pronoun resolution | 76.7% | BERT ~70% | SR ✓ |
 | Nested depth 4 | 50.0% | BERT ~38% | SR ✓ |
 | Structured QA | 40.0% | BiLSTM 28% | SR ✓ |
@@ -166,6 +170,7 @@ pronoun. This signal directly encodes "which entity does the pronoun refer to."
 | Cross-paragraph | 100% (4/4) | LSTM 50% | SR ✓ |
 | Memory usage | 0.12MB fixed | BERT 418MB | SR ✓ |
 | Low resource N=10 | 12.2% | LSTM 48.9% | LSTM |
+| Low resource N=100 | 54.4% | BiLSTM 68.9% | BiLSTM |
 
 ---
 
