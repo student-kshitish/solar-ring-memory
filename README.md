@@ -19,6 +19,12 @@ Solar Ring beats BERT on Winograd by **+10.7%** using **23 million times less tr
 
 ---
 
+## Architecture Diagram
+
+![Solar Ring Memory Architecture](docs/architecture.png)
+
+---
+
 ## The Core Idea
 
 Standard LSTM memory is a flat baton — every token competes for the same space. Subject and object get squeezed out over long sequences.
