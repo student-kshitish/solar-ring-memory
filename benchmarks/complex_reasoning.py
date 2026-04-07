@@ -13,6 +13,38 @@ sys.path.insert(0, '.')
 DEVICE = torch.device('cuda' if torch.cuda.is_available()
                       else 'cpu')
 
+STOPWORDS = {
+    'the','a','an','is','was','were','are','be',
+    'it','its','of','to','in','on','at','by',
+    'and','or','but','so','that','this','these',
+    'those','for','with','from','as','he','she',
+    'they','his','her','their','my','our','your',
+    'had','has','have','did','do','does','been',
+    'will','would','could','should','may','might',
+}
+
+def extract_nouns(text: str) -> list:
+    """Extract meaningful nouns — skip stopwords."""
+    words = [clean(w) for w in text.split()]
+    return [w for w in words
+            if w not in STOPWORDS
+            and len(w) > 2
+            and w.isalpha()]
+
+def find_noun_after(words: list, idx: int) -> str:
+    """Find first noun after position idx."""
+    for w in words[idx+1:]:
+        if w not in STOPWORDS and len(w) > 2 and w.isalpha():
+            return w
+    return ''
+
+def find_noun_before(words: list, idx: int) -> str:
+    """Find last noun before position idx."""
+    for w in reversed(words[:idx]):
+        if w not in STOPWORDS and len(w) > 2 and w.isalpha():
+            return w
+    return ''
+
 # ═══════════════════════════════════════════════════════
 # DATASET 1 — Causal Reasoning (30 examples)
 # ═══════════════════════════════════════════════════════
@@ -257,207 +289,206 @@ def clean(s):
 
 def extract_causal_chain(story: str,
                           question: str) -> str:
-    """
-    Walk causal chain backward from effect to root cause.
-    """
     sentences = [s.strip() for s in story.split('.')
                  if s.strip()]
 
-    CAUSAL_WORDS = {
-        'because', 'due', 'caused', 'since', 'as',
-        'therefore', 'so', 'hence', 'thus'
-    }
+    CAUSAL = {'because','due','caused','since',
+              'therefore','so','hence','thus'}
 
-    # Build causal graph: effect → cause
-    causal_graph = {}
+    # Build causal map: effect_noun → cause_noun
+    causal_map = {}
     for sent in sentences:
         words = [clean(w) for w in sent.split()]
         for i, w in enumerate(words):
-            if w in CAUSAL_WORDS:
-                # Words before = effect, words after = cause
-                effect_words = words[:i]
-                cause_words  = words[i+1:]
-                if effect_words and cause_words:
-                    effect_key = ' '.join(effect_words[-3:])
-                    cause_key  = ' '.join(cause_words[:3])
-                    causal_graph[effect_key] = cause_key
+            if w in CAUSAL:
+                effect_noun = find_noun_before(words, i)
+                cause_noun  = find_noun_after(words, i)
+                if effect_noun and cause_noun:
+                    causal_map[effect_noun] = cause_noun
 
-    # Find root cause by walking graph
-    q_words = [clean(w) for w in question.split()]
+    # Find focus of question
+    q_nouns = extract_nouns(question)
+    focus = q_nouns[0] if q_nouns else ''
 
-    # Find the core noun in question
-    SKIP = {'why','did','was','the','a','an','is','what',
-            'happened','caused','made','it'}
-    focus = next((w for w in q_words if w not in SKIP
-                  and len(w) > 2), None)
-
-    if not focus:
-        return 'unknown'
-
-    # Walk backward through causal chain
+    # Walk backward to root cause
     visited = set()
     current = focus
     root = focus
 
-    for _ in range(5):  # max 5 hops
-        matched = None
-        for effect, cause in causal_graph.items():
-            if current in effect and effect not in visited:
-                matched = cause
-                visited.add(effect)
-                break
-        if matched:
-            root = matched.split()[0]
-            current = matched
+    for _ in range(5):
+        if current in causal_map and current not in visited:
+            visited.add(current)
+            root = causal_map[current]
+            current = root
         else:
             break
 
-    # Return first content word of root
-    root_words = [w for w in root.split()
-                  if w not in SKIP and len(w) > 2]
-    return root_words[0] if root_words else root
+    return root
 
 
 def extract_spatial(story: str, question: str) -> str:
-    """
-    Extract spatial answer from ordered positions.
-    """
-    words_s = [clean(w) for w in story.split()]
-    words_q = [clean(w) for w in question.split()]
+    sentences = [s.strip() for s in story.split('.')
+                 if s.strip()]
 
-    POSITION_WORDS = {
-        'left': -1, 'right': 1,
-        'above': 1, 'below': -1,
-        'top': 2, 'bottom': -2,
-        'front': 1, 'behind': -1,
-    }
-
+    # position map: entity → integer position
     positions = {}
-    for i, w in enumerate(words_s):
-        if w in POSITION_WORDS:
-            direction = POSITION_WORDS[w]
-            if i > 0 and i < len(words_s) - 2:
-                obj1 = words_s[i-1].rstrip('the ')
-                obj2 = words_s[i+2] if i+2 < len(words_s) else ''
-                if obj1 and obj2:
-                    if obj1 not in positions:
-                        positions[obj1] = 0
-                    if obj2 not in positions:
-                        positions[obj2] = 0
-                    positions[obj2] = positions[obj1] + direction
+    current_pos = 0
+
+    for sent in sentences:
+        words = [clean(w) for w in sent.split()]
+        for i, w in enumerate(words):
+            if w in ('left','right','above','below',
+                     'top','bottom','front','behind'):
+                obj1 = find_noun_before(words, i)
+                obj2 = find_noun_after(words, i)
+
+                if not obj1 or not obj2:
+                    continue
+
+                if obj1 not in positions:
+                    positions[obj1] = current_pos
+                    current_pos += 1
+
+                if w in ('left','above','front'):
+                    positions[obj2] = positions[obj1] + 1
+                else:
+                    positions[obj2] = positions[obj1] - 1
 
     if not positions:
         return 'unknown'
 
-    q = ' '.join(words_q)
+    q_words = [clean(w) for w in question.split()]
+    q = ' '.join(q_words)
 
-    if 'rightmost' in q:
+    if 'rightmost' in q or 'right' in q and 'most' in q:
         return max(positions, key=positions.get)
-    if 'leftmost' in q:
+    if 'leftmost' in q or 'left' in q and 'most' in q:
         return min(positions, key=positions.get)
     if 'bottom' in q:
-        return min(positions, key=positions.get)
+        return max(positions, key=positions.get)
     if 'top' in q:
-        return max(positions, key=positions.get)
-    if 'between' in q:
-        sorted_objs = sorted(positions, key=positions.get)
-        if len(sorted_objs) >= 3:
-            return sorted_objs[len(sorted_objs)//2]
-        return sorted_objs[0] if sorted_objs else 'unknown'
-    if 'is a left of c' in q or 'is green to the right of red' in q:
-        return 'yes'
-    if 'is c above a' in q:
-        return 'no'
-    if 'yes' in q or 'no' in q:
-        # Handle yes/no spatial questions
-        if 'left of' in q or 'right of' in q or 'above' in q:
-            objs = [k for k in positions]
-            if len(objs) >= 2:
-                vals = list(positions.values())
-                if 'left' in q:
-                    return 'yes' if vals[0] < vals[-1] else 'no'
-                if 'right' in q:
-                    return 'yes' if vals[-1] > vals[0] else 'no'
-                if 'above' in q:
-                    return 'no'  # C is not above A if A above C
-    if 'first' in q or 'earliest' in q:
         return min(positions, key=positions.get)
-    if 'last' in q:
+    if 'rightmost' in q:
         return max(positions, key=positions.get)
-    if 'directly below' in q or 'right of' in q:
-        for obj in positions:
-            if obj in q:
-                target_pos = positions[obj] - 1
-                for candidate, pos in positions.items():
-                    if pos == target_pos:
-                        return candidate
-    if 'directly above' in q:
-        for obj in positions:
-            if obj in q:
-                target_pos = positions[obj] + 1
-                for candidate, pos in positions.items():
-                    if pos == target_pos:
-                        return candidate
+    if 'first' in q or 'leftmost' in q:
+        return min(positions, key=positions.get)
+    if 'last' in q or 'rightmost' in q:
+        return max(positions, key=positions.get)
 
-    # "right of X" — object immediately to the right
-    for obj in sorted(positions, key=lambda x: len(x),
-                      reverse=True):
+    # "right of X" → find X then return X+1
+    for obj in positions:
         if obj in q:
             target_pos = positions[obj] + 1
             for candidate, pos in positions.items():
                 if pos == target_pos:
                     return candidate
 
+    # yes/no questions
+    q_nouns = extract_nouns(question)
+    if 'yes' in q or 'no' in q or 'is' in q_words:
+        if len(q_nouns) >= 2:
+            a, b = q_nouns[0], q_nouns[1]
+            pa = positions.get(a, 0)
+            pb = positions.get(b, 0)
+            if 'left' in q:
+                return 'yes' if pa < pb else 'no'
+            if 'right' in q:
+                return 'yes' if pa > pb else 'no'
+            if 'above' in q:
+                return 'yes' if pa < pb else 'no'
+
+    # "between X and Z" → find middle
+    if 'between' in q_words:
+        if len(q_nouns) >= 2:
+            a, b = q_nouns[0], q_nouns[-1]
+            pa = positions.get(a, 0)
+            pb = positions.get(b, 0)
+            mid = (pa + pb) / 2
+            closest = min(positions,
+                         key=lambda x: abs(positions[x]-mid)
+                         if x not in (a,b) else 999)
+            return closest
+
+    # how many to the right of X
+    if 'how many' in q:
+        q_nouns_filt = [n for n in q_nouns
+                        if n in positions]
+        if q_nouns_filt:
+            ref_pos = positions[q_nouns_filt[0]]
+            if 'right' in q:
+                count = sum(1 for p in positions.values()
+                           if p > ref_pos)
+            else:
+                count = sum(1 for p in positions.values()
+                           if p < ref_pos)
+            return str(count)
+
     return list(positions.keys())[0]
 
 
 def extract_temporal(story: str, question: str) -> str:
-    """
-    Extract temporal answer from ordering.
-    """
-    BEFORE_WORDS = {'before', 'earlier', 'prior', 'first'}
-    AFTER_WORDS  = {'after', 'later', 'following', 'last'}
+    sentences = [s.strip() for s in story.split('.')
+                 if s.strip()]
 
-    words_s = [clean(w) for w in story.split()]
-    words_q = [clean(w) for w in question.split()]
+    BEFORE = {'before','earlier','prior','first','ago'}
+    AFTER  = {'after','later','following','last','then'}
+    LONGER = {'longer','more','greater','larger'}
+    SHORTER= {'shorter','less','fewer','smaller'}
 
-    # Build temporal order
-    order = []
-    for i, w in enumerate(words_s):
-        if w in BEFORE_WORDS:
-            if i > 0 and i < len(words_s)-1:
-                subj = words_s[i-1]
-                obj  = words_s[i+1]
-                if subj not in order:
-                    order.append(subj)
-                if obj not in order:
-                    order.append(obj)
-        if w in AFTER_WORDS:
-            if i > 0 and i < len(words_s)-1:
-                subj = words_s[i-1]
-                obj  = words_s[i+1]
-                if obj not in order:
-                    order.insert(0, obj)
-                if subj not in order:
-                    order.append(subj)
+    order = []  # ordered list earliest→latest
+    durations = {}  # entity → duration value
+
+    for sent in sentences:
+        words = [clean(w) for w in sent.split()]
+
+        # Duration extraction: "X took N days/hours"
+        for i, w in enumerate(words):
+            if w.isdigit() and i > 0:
+                entity = find_noun_before(words, i)
+                if entity and entity not in STOPWORDS:
+                    durations[entity] = int(w)
+
+        # Ordering extraction
+        for i, w in enumerate(words):
+            if w in BEFORE:
+                subj = find_noun_before(words, i)
+                obj  = find_noun_after(words, i)
+                if subj and obj:
+                    if subj not in order:
+                        order.append(subj)
+                    if obj not in order:
+                        order.append(obj)
+            if w in AFTER:
+                subj = find_noun_before(words, i)
+                obj  = find_noun_after(words, i)
+                if subj and obj:
+                    if obj not in order:
+                        order.insert(0, obj)
+                    if subj not in order:
+                        order.append(subj)
+
+    q_words = [clean(w) for w in question.split()]
+    q = ' '.join(q_words)
+
+    # Duration questions
+    if any(w in q_words for w in LONGER) and durations:
+        return max(durations, key=durations.get)
+    if any(w in q_words for w in SHORTER) and durations:
+        return min(durations, key=durations.get)
 
     if not order:
         return 'unknown'
 
-    q = ' '.join(words_q)
-
-    if 'first' in q or 'earliest' in q or 'oldest' in q:
+    if any(w in q_words for w in
+           ('first','earliest','oldest','start')):
         return order[0]
-    if 'last' in q or 'latest' in q:
+    if any(w in q_words for w in
+           ('last','latest','newest','end')):
         return order[-1]
-    if 'second' in q:
+    if 'second' in q_words:
         return order[1] if len(order) > 1 else order[0]
-    if 'third' in q:
+    if 'third' in q_words:
         return order[2] if len(order) > 2 else order[-1]
-    if 'longer' in q:
-        return order[-1]
-    if 'shorter' in q:
-        return order[0]
 
     return order[0]
 
@@ -625,8 +656,6 @@ if __name__ == "__main__":
     subprocess.run(['git', 'add',
                    'benchmarks/complex_reasoning.py'])
     subprocess.run(['git', 'commit', '-m',
-        f'feat: complex reasoning benchmark - '
-        f'causal+spatial+temporal+multihop '
-        f'overall={overall:.1f}%'])
+        'fix: complex reasoning extractors - proper noun extraction'])
     subprocess.run(['git', 'push', 'origin', 'main'])
     print("\nPushed to GitHub.")
