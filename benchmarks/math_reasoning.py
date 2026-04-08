@@ -161,16 +161,16 @@ OPERATIONS = {
 
 GIVE_VERBS = {'gives', 'gave', 'give', 'donates', 'sends',
               'transfers', 'pays', 'lends'}
-TAKE_VERBS = {'eats', 'ate', 'spends', 'spent', 'loses',
+TAKE_VERBS = {'eats', 'ate', 'eaten', 'spends', 'spent', 'loses',
               'lost', 'removes', 'removed', 'uses', 'used',
-              'takes', 'took'}
+              'takes', 'took', 'sold', 'stolen', 'given'}
 GET_VERBS  = {'finds', 'found', 'gets', 'got', 'earns',
               'earned', 'receives', 'received', 'gains',
-              'restocked', 'adds'}
+              'restocked', 'adds', 'buys', 'bought'}
 
 
 def parse_number(word):
-    """Parse word to number including word-numbers."""
+    """Parse word to number including word-numbers and numeric prefixes like 3km."""
     WORD_NUMS = {
         'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4,
         'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
@@ -185,7 +185,17 @@ def parse_number(word):
     try:
         return float(w)
     except ValueError:
-        return WORD_NUMS.get(w, None)
+        pass
+    # Strip trailing non-digit suffix (e.g. "3km" → 3)
+    i = 0
+    while i < len(w) and (w[i].isdigit() or w[i] == '.'):
+        i += 1
+    if i > 0:
+        try:
+            return float(w[:i])
+        except ValueError:
+            pass
+    return WORD_NUMS.get(w, None)
 
 
 def _fmt(val):
@@ -256,6 +266,13 @@ def solve_variable_tracking(problem, question):
     return 'unknown'
 
 
+NAMES = {'john', 'mary', 'tom', 'sarah', 'beth',
+         'anna', 'bob', 'paul', 'george', 'lisa',
+         'susan', 'daniel', 'sandra', 'alice'}
+
+PRONOUNS = {'he', 'she', 'they', 'it'}
+
+
 def solve_word_problem(problem, question):
     """
     Track entity quantities across a word problem.
@@ -266,9 +283,22 @@ def solve_word_problem(problem, question):
 
     # Entity store: name → quantity
     entity_store = {}
+    last_named = None
+    last_entity = None  # last entity that was assigned a value
+    deferred = []       # (target, op, multiplier, ref) for forward refs
 
     for sent in sentences:
         words = [clean(w) for w in sent.split()]
+
+        # Resolve pronouns using last_named from PREVIOUS sentences first
+        if last_named:
+            words = [last_named if w in PRONOUNS else w for w in words]
+
+        # Then update last_named from the subject of this (resolved) sentence
+        for w in words:
+            if w in NAMES:
+                last_named = w
+                break
 
         for i, w in enumerate(words):
 
@@ -279,69 +309,112 @@ def solve_word_problem(problem, question):
                     num = parse_number(words[j])
                     if num is not None:
                         entity_store[entity] = num
+                        last_entity = entity
                         break
 
             # "X gives/donates/pays N" — entity loses quantity
             if w in GIVE_VERBS and i > 0:
                 entity = words[i - 1]
-                for j in range(i + 1, len(words)):
-                    num = parse_number(words[j])
-                    if num is not None:
-                        if entity in entity_store:
-                            entity_store[entity] -= num
-                        break
+                if entity not in ('are', 'were', 'been', 'is'):
+                    for j in range(i + 1, len(words)):
+                        num = parse_number(words[j])
+                        if num is not None:
+                            if entity in entity_store:
+                                entity_store[entity] -= num
+                            break
 
             # "X eats/spends/loses/removes N" — entity loses quantity
             if w in TAKE_VERBS and i > 0:
                 entity = words[i - 1]
-                for j in range(i + 1, len(words)):
-                    num = parse_number(words[j])
-                    if num is not None:
-                        if entity in entity_store:
-                            entity_store[entity] -= num
-                        break
+                if entity in ('are', 'were', 'been', 'is'):
+                    # Passive: "N [things] are removed" — apply to last_entity
+                    if last_entity and last_entity in entity_store:
+                        for k in range(i - 2, -1, -1):
+                            num = parse_number(words[k])
+                            if num is not None:
+                                entity_store[last_entity] -= num
+                                break
+                else:
+                    for j in range(i + 1, len(words)):
+                        num = parse_number(words[j])
+                        if num is not None:
+                            if entity in entity_store:
+                                entity_store[entity] -= num
+                            break
 
-            # "X finds/earns/receives N" — entity gains quantity
+            # "X finds/earns/receives/buys N" — entity gains quantity
             if w in GET_VERBS and i > 0:
                 entity = words[i - 1]
-                for j in range(i + 1, len(words)):
-                    num = parse_number(words[j])
-                    if num is not None:
-                        if entity in entity_store:
-                            entity_store[entity] += num
-                        break
+                if entity in ('are', 'were', 'been', 'is'):
+                    # Passive: "N are restocked" — apply to last_entity
+                    if last_entity and last_entity in entity_store:
+                        for k in range(i - 2, -1, -1):
+                            num = parse_number(words[k])
+                            if num is not None:
+                                entity_store[last_entity] += num
+                                break
+                else:
+                    for j in range(i + 1, len(words)):
+                        num = parse_number(words[j])
+                        if num is not None:
+                            # Initialize if not present (e.g. first "earns")
+                            entity_store[entity] = (
+                                entity_store.get(entity, 0) + num
+                            )
+                            last_entity = entity
+                            break
 
             # "X times as many as Y" → target = multiplier × Y's value
+            # Pattern: "Tom has 3 times as many X as John"
             if w == 'times' and i > 0:
                 multiplier = parse_number(words[i - 1])
-                if 'as' in words[i:] and len(words) > i + 3:
-                    ref_idx = words.index('as', i) + 1
-                    if ref_idx < len(words):
-                        ref = words[ref_idx]
-                        if (multiplier and ref in entity_store
-                                and i > 2):
-                            target = words[i - 3]
-                            entity_store[target] = (
-                                multiplier * entity_store[ref]
-                            )
+                # Find last 'as' to get reference entity
+                last_as = None
+                for k in range(len(words) - 1, i, -1):
+                    if words[k] == 'as':
+                        last_as = k
+                        break
+                if multiplier and last_as and last_as + 1 < len(words):
+                    ref = words[last_as + 1]
+                    target = words[i - 3] if i >= 3 else words[0]
+                    if ref in entity_store:
+                        entity_store[target] = (
+                            multiplier * entity_store[ref]
+                        )
+                    else:
+                        deferred.append(('times', target, multiplier, ref))
 
-            # "half as many as Y"
+            # "half as many as Y" — find last 'as' for reference
             if w == 'half' and 'as' in words:
-                if i + 3 < len(words):
-                    ref = words[i + 3] if words[i + 1] == 'as' else ''
-                    if ref in entity_store and i > 1:
-                        target = words[i - 2]
+                last_as = None
+                for k in range(len(words) - 1, i, -1):
+                    if words[k] == 'as':
+                        last_as = k
+                        break
+                if last_as and last_as + 1 < len(words):
+                    ref = words[last_as + 1]
+                    target = words[i - 2] if i >= 2 else words[0]
+                    if ref in entity_store:
                         entity_store[target] = entity_store[ref] / 2
+                    else:
+                        deferred.append(('half', target, 0.5, ref))
 
-            # "Each unit has N seats" → total = count × N
+            # "Each unit has N seats" → total = prior_entity_count × N
             if w == 'each' and i + 2 < len(words):
                 unit = words[i + 1]
                 for j in range(i + 2, len(words)):
                     num = parse_number(words[j])
                     if num is not None:
-                        for ent, qty in entity_store.items():
-                            if unit in ent or ent in unit:
-                                entity_store['total'] = qty * num
+                        # Use last_entity count as the multiplier
+                        if last_entity and last_entity in entity_store:
+                            entity_store['total'] = (
+                                entity_store[last_entity] * num
+                            )
+                        else:
+                            for ent, qty in entity_store.items():
+                                if unit in ent or ent in unit:
+                                    entity_store['total'] = qty * num
+                                    break
                         break
 
         # "X runs N km each day for M days" → total = N × M
@@ -353,7 +426,28 @@ def solve_word_problem(problem, question):
                     nums.append(n)
             if len(nums) >= 2:
                 entity = words[0]
-                entity_store[entity + '_total'] = nums[0] * nums[1]
+                total = nums[0] * nums[1]
+                entity_store[entity + '_total'] = total
+                # Also subtract from a container if passive pattern
+                if (last_entity and last_entity in entity_store
+                        and last_entity != entity):
+                    entity_store[last_entity] -= total
+
+        # Passive "N are TAKE_VERB each day for M days" (e.g. "10 are eaten each day for 3 days")
+        if ('each' in words and 'for' in words and 'days' in words
+                and any(w2 in TAKE_VERBS for w2 in words)):
+            nums = []
+            for w2 in words:
+                n = parse_number(w2)
+                if n is not None:
+                    nums.append(n)
+            if len(nums) >= 2 and last_entity and last_entity in entity_store:
+                entity_store[last_entity] -= nums[0] * nums[1]
+
+    # Resolve deferred forward-reference computations
+    for op, target, multiplier, ref in deferred:
+        if ref in entity_store:
+            entity_store[target] = multiplier * entity_store[ref]
 
     # Answer the question
     q_words = [clean(w) for w in question.split()]
@@ -361,10 +455,11 @@ def solve_word_problem(problem, question):
               'together', 'what', 'is', 'are', 'left',
               'total', 'the', 'in', '?'}
 
-    # "together" → sum all entity values
+    # "together" → sum named entity values (exclude computed _total keys)
     if 'together' in q_words:
-        total = sum(v for v in entity_store.values()
-                    if isinstance(v, (int, float)))
+        total = sum(v for k, v in entity_store.items()
+                    if isinstance(v, (int, float))
+                    and not k.endswith('_total') and k != 'total')
         return _fmt(total)
 
     # Explicit 'total' key
