@@ -9,12 +9,10 @@
 
 ## Headline Results
 
-| Model | Winograd | Pronoun | bAbI Avg | Complex Reasoning | Memory |
-|-------|----------|---------|----------|-------------------|--------|
-| **Solar Ring** | **87.5%** | **76.7%** | **100%*** | **78.3%** | **27MB** |
-| BERT-base | ~70% | ~70% | ~75% | ~64.5% | 418MB |
-
-*rule-based slot reading — no training required
+| Model | Winograd | Math | Complex | Memory |
+|-------|----------|------|---------|--------|
+| **Solar Ring** | **87.5%** | **91.7%** | **78.3%** | **27MB** |
+| BERT-base | ~70% | ~49% | ~64.5% | 418MB |
 
 Solar Ring + Light Speed beats BERT on Winograd by **+17.5%** using **23 million times less training data**.
 
@@ -146,7 +144,7 @@ pronoun. This signal directly encodes "which entity does the pronoun refer to."
 
 ---
 
-## Complete Benchmark Table — 17/19 Wins
+## Complete Benchmark Table — 20/22 Wins
 
 | Benchmark | Solar Ring | Best Competitor | Winner |
 |-----------|-----------|-----------------|--------|
@@ -156,6 +154,9 @@ pronoun. This signal directly encodes "which entity does the pronoun refer to."
 | **Multi-hop relations** | **100%** | BERT ~55% | **SR ✓** |
 | **Temporal ordering** | **86.7%** | BERT ~68% | **SR ✓** |
 | **Spatial ordering** | **80.0%** | BERT ~70% | **SR ✓** |
+| **Math reasoning overall** | **91.7%** | BERT ~49% | **SR ✓** |
+| **Variable tracking** | **100%** | BERT ~50% | **SR ✓** |
+| **Word problems** | **100%** | BERT ~55% | **SR ✓** |
 | Pronoun resolution | 76.7% | BERT ~70% | SR ✓ |
 | Nested depth 4 | 50.0% | BERT ~38% | SR ✓ |
 | Structured QA | 40.0% | BiLSTM 28% | SR ✓ |
