@@ -18,6 +18,20 @@ from solar_ring.solar_memory import SolarMemory
 from solar_ring.sun_state import SunState
 from solar_ring.black_white_hole import BlackWhiteHoleManager
 from benchmarks.direct_train import build_vocab, build_generated_pairs
+from benchmarks.winograd_80 import (
+    WinogradSpringModel,
+    find_pronoun_idx,
+    PRONOUNS,
+)
+
+# Stopwords filtered out when building candidate lists
+_CAND_STOPWORDS = {
+    'the', 'a', 'an', 'is', 'was', 'were',
+    'that', 'because', 'which', 'not',
+    'did', 'do', 'too', 'so', 'and', 'but',
+    'in', 'on', 'at', 'to', 'of', 'by', 'as',
+    'for', 'with', 'from', 'be', 'been',
+}
 
 
 def load_model(vocab_size):
@@ -37,7 +51,87 @@ def load_model(vocab_size):
     return model
 
 
-def process_sentence(sentence, model, vocab):
+def load_spring_model():
+    """Load MiniLM + Solar Spring model (87.5% Winograd accuracy)."""
+    print("Loading MiniLM + Solar Spring model...")
+    spring_model = WinogradSpringModel().to(DEVICE)
+    try:
+        ckpt = torch.load(
+            'checkpoints/winograd80_best.pt',
+            map_location=DEVICE,
+            weights_only=True,
+        )
+        spring_model.spring.load_state_dict(ckpt['spring'])
+        spring_model.head.load_state_dict(ckpt['head'])
+        print("Solar Spring checkpoint loaded (87.5% Winograd)")
+    except Exception as e:
+        print(f"Spring checkpoint not found: {e}")
+    spring_model.spring.eval()
+    spring_model.head.eval()
+    return spring_model
+
+
+def resolve_with_spring(sentence, spring_model):
+    """
+    Use MiniLM + Solar Spring to resolve pronouns.
+    Much more accurate than base GloVe model.
+
+    The model is trained to score `ctx + candidate` higher for the
+    correct referent. We collect candidate nouns from the sentence,
+    score each one via score_from_vecs(), and return the winner.
+    """
+    words = sentence.lower().split()
+    stripped = [w.rstrip('.,;:!?') for w in words]
+
+    found_pronouns = [(i, w) for i, w in enumerate(stripped)
+                      if w in PRONOUNS]
+    if not found_pronouns:
+        return []
+
+    # Candidate nouns: content words that are not pronouns or stopwords
+    candidates = [
+        w for w in stripped
+        if w not in PRONOUNS
+        and w not in _CAND_STOPWORDS
+        and len(w) > 2
+    ]
+    # Deduplicate while preserving order
+    seen = set()
+    candidates = [c for c in candidates
+                  if not (c in seen or seen.add(c))]
+
+    if not candidates:
+        return []
+
+    # Build all sentences to score in one batched MiniLM call
+    # Pattern: sentence + ' ' + candidate  (candidate appears as final token;
+    # backward attention from candidate → pronoun selects the referent)
+    scored_sents = [sentence + ' ' + c for c in candidates]
+    emb_cache = spring_model.embedder.embed_words_batch(scored_sents)
+
+    results = []
+    for pronoun_pos, pronoun in found_pronouns:
+        best_score = float('-inf')
+        best_cand  = candidates[0]
+
+        with torch.no_grad():
+            for cand, sent in zip(candidates, scored_sents):
+                try:
+                    logit = spring_model.score_from_vecs(
+                        sent, emb_cache[sent]
+                    ).item()
+                    if logit > best_score:
+                        best_score = logit
+                        best_cand  = cand
+                except Exception:
+                    continue
+
+        results.append((pronoun, best_cand, best_score))
+
+    return results
+
+
+def process_sentence(sentence, model, vocab, spring_model):
     words = sentence.lower().split()
     ids = torch.tensor(
         [vocab.get(w.rstrip('.,;:!?'), 0) for w in words],
@@ -72,8 +166,8 @@ def process_sentence(sentence, model, vocab):
 
     # ── Black/White hole events (physics pass) ───────────────────────────────
     print(f"\nBlack/White hole events:")
-    sun  = SunState(300, alpha=0.3, device=DEVICE)
-    mgr  = BlackWhiteHoleManager(300, DEVICE, sun)
+    sun = SunState(300, alpha=0.3, device=DEVICE)
+    mgr = BlackWhiteHoleManager(300, DEVICE, sun)
 
     all_events = []
     for word in words:
@@ -89,38 +183,20 @@ def process_sentence(sentence, model, vocab):
     sun_norm = sun.state.norm().item()
     print(f"\nSun State norm: {sun_norm:.4f}")
 
-    # ── Pronoun resolution ───────────────────────────────────────────────────
-    PRONOUNS = {'it', 'he', 'she', 'they', 'him', 'her',
-                'them', 'who', 'which', 'that'}
-    found_pronouns = [w.rstrip('.,;:!?') for w in words
-                      if w.rstrip('.,;:!?') in PRONOUNS]
+    # ── Pronoun resolution — MiniLM + Solar Spring (87.5% model) ─────────────
+    stripped = [w.rstrip('.,;:!?') for w in words]
+    found_pronouns = [w for w in stripped if w in PRONOUNS]
 
     if found_pronouns:
-        print(f"\nPronouns found: {found_pronouns}")
-        for pronoun in found_pronouns:
-            pron_id  = vocab.get(pronoun, 0)
-            pron_vec = model.embedding.weight[pron_id]
-
-            best_score = -1.0
-            best_word  = 'unknown'
-
-            for w in words:
-                wc = w.rstrip('.,;:!?')
-                if wc in PRONOUNS:
-                    continue
-                wid = vocab.get(wc, 0)
-                if wid == 0:
-                    continue
-                w_vec = model.embedding.weight[wid]
-                score = torch.cosine_similarity(
-                    pron_vec.unsqueeze(0),
-                    w_vec.unsqueeze(0),
-                ).item()
-                if score > best_score:
-                    best_score = score
-                    best_word  = wc
-
-            print(f"  '{pronoun}' → '{best_word}' (score={best_score:.3f})")
+        print(f"\nPronouns: {found_pronouns}")
+        print("Resolving with MiniLM + Solar Spring (87.5% model):")
+        results = resolve_with_spring(sentence, spring_model)
+        if results:
+            for pronoun, candidate, score in results:
+                print(f"  '{pronoun}' → '{candidate}' "
+                      f"(confidence={score:.3f})")
+        else:
+            print("  No candidate nouns found to resolve against.")
     else:
         print("\nNo pronouns found in sentence.")
 
@@ -146,12 +222,14 @@ def main():
     params = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {params:,}")
 
+    spring_model = load_spring_model()
+
     print("\nType any sentence and press Enter.")
     print("Type 'quit' to exit.")
     print("Examples:")
-    print("  John told Mary that the cat chased the dog.")
+    print("  John told Paul that he should leave early.")
+    print("  The trophy did not fit the suitcase because it was too big.")
     print("  Sarah helped Beth because she was tired.")
-    print("  The trophy did not fit because it was too big.")
     print()
 
     while True:
@@ -168,7 +246,7 @@ def main():
             break
 
         try:
-            process_sentence(sentence, model, vocab)
+            process_sentence(sentence, model, vocab, spring_model)
         except Exception as e:
             print(f"Error: {e}")
             import traceback
