@@ -200,6 +200,46 @@ def build_pronoun_augmentation():
     return pairs
 
 
+def sentence_to_concepts(sentence: str,
+                          vocab: dict,
+                          depth: int = 0) -> tuple:
+    """
+    Convert a sentence to (concepts, vecs) for SolarSpring.
+    Words not in vocab get zero vectors.
+    """
+    words = sentence.split()
+    SUBJ_SET = {
+        'john','mary','tom','trophy','cat','dog',
+        'ball','man','woman','he','she','they',
+        'paul','george','susan','joan','alice',
+        'bob','chris','dave','anna','beth','carol',
+        'sarah','lisa','mike','sam','steve','tim',
+        'emma','diana','rachel','sara','nick','jake',
+        'mark','amy',
+    }
+    concepts = []
+    for i, word in enumerate(words):
+        wl = word.lower().rstrip('.,;')
+        pos_idx = 0 if wl in SUBJ_SET else 3
+        concepts.append({
+            'pos_idx':   pos_idx,
+            'depth':     depth,
+            'token_pos': i,
+            'slot_idx':  pos_idx,
+        })
+
+    vecs_list = []
+    for word in words:
+        wl = word.lower().rstrip('.,;')
+        if wl in vocab:
+            vecs_list.append(vocab[wl])
+        else:
+            vecs_list.append(torch.zeros(D, device=DEVICE))
+
+    vecs = torch.stack(vecs_list)
+    return concepts, vecs
+
+
 class WinogradSpringModel(nn.Module):
     """
     MiniLM contextual embeddings + Solar Spring attention.
@@ -266,6 +306,39 @@ class WinogradSpringModel(nn.Module):
 
         pronoun_vec = out[p_idx]
         combined    = torch.cat([vec, pronoun_vec])
+        return self.head(combined.float())
+
+    def score_sentence(self, sentence: str) -> torch.Tensor:
+        """
+        Score a sentence for pronoun resolution.
+        Returns scalar logit — higher = more likely correct.
+        """
+        words = sentence.split()
+        conc, vecs = sentence_to_concepts(sentence, {})
+
+        out, A, _ = self.spring(conc, vecs)
+
+        PRONOUNS = {'it','he','she','they','him','her',
+                    'them','who','which','that','its'}
+
+        p_idx = next(
+            (i for i,w in enumerate(words)
+             if w.lower().rstrip('.,;') in PRONOUNS),
+            len(words)-1
+        )
+        c_idx = len(words) - 1
+        L = len(words)
+        p_idx = min(p_idx, L-1)
+        c_idx = min(c_idx, L-1)
+
+        if A is not None and L > 1:
+            attn = A[c_idx, p_idx]
+            vec  = out[c_idx] + attn * out[p_idx]
+        else:
+            vec = out[c_idx]
+
+        pv = out[p_idx]
+        combined = torch.cat([vec, pv])
         return self.head(combined.float())
 
     def count_parameters(self):
