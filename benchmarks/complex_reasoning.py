@@ -791,6 +791,446 @@ def extract_causal_chain_v2(story: str,
 
 
 # ═══════════════════════════════════════════════════════
+# COMPOSE_V3 / INVERSE_V3 — Extended relation tables
+# ═══════════════════════════════════════════════════════
+
+COMPOSE_V3 = {
+    ('father', 'father'):                   'grandfather',
+    ('mother', 'mother'):                   'grandmother',
+    ('father', 'mother'):                   'grandfather',
+    ('mother', 'father'):                   'grandmother',
+    ('father', 'father', 'father'):         'great-grandfather',
+    ('mother', 'mother', 'mother'):         'great-grandmother',
+    ('father', 'father', 'son'):            'grandfather',
+    ('mother', 'father', 'son'):            'grandmother',
+    ('son',    'son',    'son'):            'great-grandfather',
+    ('father', 'son'):                      'brother',
+    ('mother', 'son'):                      'brother',
+    ('father', 'daughter'):                 'sister',
+    ('mother', 'daughter'):                 'sister',
+    ('sister', 'daughter'):                 'daughter',
+    ('brother', 'daughter'):                'daughter',
+    ('sister', 'son'):                      'son',
+    ('sister', 'father', 'son'):            'aunt',
+    ('sister', 'father', 'mother'):         'aunt',
+}
+
+INVERSE_V3 = {
+    'father':       'child',
+    'mother':       'child',
+    'son':          'parent',
+    'daughter':     'parent',
+    'brother':      'sibling',
+    'sister':       'sibling',
+    'grandfather':  'grandchild',
+    'grandmother':  'grandchild',
+    'uncle':        'nephew',
+    'aunt':         'niece',
+}
+
+
+def fixed_causal_v3(story: str, question: str) -> str:
+    """Causal v3: state-adjectives (late, dark, sick …) are valid effects."""
+    sentences = [s.strip() for s in story.split('.') if s.strip()]
+
+    CAUSAL = {'because', 'due', 'caused', 'since',
+               'therefore', 'so', 'hence', 'thus'}
+
+    CAUSAL_VERBS = {
+        'ran', 'won', 'got', 'had', 'felt', 'made',
+        'died', 'fell', 'came', 'went', 'ate', 'said',
+        'told', 'gave', 'took', 'put', 'set', 'lost',
+        'hit', 'spread', 'broke', 'skidded', 'spoiled',
+        'stopped', 'started', 'formed', 'evaporated',
+        'heated', 'polluted', 'weakened', 'overslept',
+        'forgot', 'missed', 'caught', 'flooded',
+        'damaged', 'failed', 'barked', 'slipped',
+        'bumped', 'worked', 'became',
+    }
+
+    # Remove state-adjectives so they can appear as causal effects
+    SW = STOPWORDS - {
+        'wet', 'dry', 'hot', 'cold', 'late', 'early',
+        'dark', 'sick', 'weak',
+    }
+
+    noun_cause = {}
+
+    for sent in sentences:
+        words = [clean(w) for w in sent.split()]
+        for i, w in enumerate(words):
+            if w not in CAUSAL:
+                continue
+            before = words[:i]
+            after  = words[i + 1:]
+
+            cause_nouns  = [x for x in after
+                            if x not in SW and x.isalpha()
+                            and x not in CAUSAL_VERBS]
+            effect_nouns = [x for x in before
+                            if x not in SW and x.isalpha()
+                            and x not in CAUSAL_VERBS]
+
+            if cause_nouns and effect_nouns:
+                cause = cause_nouns[0]
+                for eff in effect_nouns:
+                    noun_cause[eff] = cause
+
+    Q_SKIP = {'why', 'what', 'where', 'when', 'who', 'how',
+              'did', 'was', 'were', 'is', 'are', 'the', 'a',
+              'an', 'happen', 'cause', 'make', 'made',
+              'happened', 'caused', 'result', 'get', 'got'}
+
+    q_words = [clean(w) for w in question.split()]
+    q_nouns = [w for w in q_words
+               if w not in Q_SKIP and w not in SW and w.isalpha()]
+
+    if not q_nouns:
+        return 'unknown'
+
+    def walk_root(start):
+        visited, cur = set(), start
+        while cur in noun_cause and cur not in visited:
+            visited.add(cur)
+            cur = noun_cause[cur]
+        return cur
+
+    for focus in q_nouns:
+        if focus in noun_cause:
+            return walk_root(focus)
+
+    for focus in q_nouns:
+        if focus in noun_cause.values():
+            return focus
+
+    best = None
+    for focus in q_nouns:
+        for key in noun_cause:
+            if focus in key or key in focus:
+                best = key
+                break
+        if best:
+            break
+
+    if best:
+        return walk_root(best)
+
+    if noun_cause:
+        roots = [v for v in noun_cause.values()
+                 if v not in noun_cause]
+        if roots:
+            return roots[-1]
+
+    return 'unknown'
+
+
+def fixed_spatial_v3(story: str, question: str) -> str:
+    """Spatial v3: handles digit/letter identifiers like 'box 1', 'box 2'."""
+    sentences = [s.strip() for s in story.split('.') if s.strip()]
+    positions  = {}
+    cur_pos    = 0
+
+    GENERIC = {'left', 'right', 'above', 'below',
+               'ball', 'box', 'cup', 'item'}
+
+    def _tok(w):
+        return (len(w) > 0
+                and (w.isalpha() or w.isdigit())
+                and w not in STOPWORDS
+                and w not in GENERIC)
+
+    def _pick_before(words, pivot):
+        for j in range(pivot - 1, -1, -1):
+            t = words[j]
+            if t in COLORS:
+                return t
+            if len(t) == 1 and (t.isupper() or t.isdigit()):
+                return t
+            if _tok(t):
+                return t
+        return find_noun_before(words, pivot)
+
+    def _pick_after(words, pivot):
+        j = pivot + 1
+        while j < len(words) and words[j] in ('of', 'the', 'a', 'an', 'to'):
+            j += 1
+        while j < len(words):
+            t = words[j]
+            if t in COLORS:
+                return t
+            if len(t) == 1 and (t.isupper() or t.isdigit()):
+                return t
+            if _tok(t):
+                return t
+            j += 1
+        return find_noun_after(words, pivot)
+
+    for sent in sentences:
+        words = [clean(w) for w in sent.split()]
+        for i, w in enumerate(words):
+            if w not in ('left', 'right', 'above', 'below',
+                         'top', 'bottom', 'front', 'behind'):
+                continue
+
+            obj1 = _pick_before(words, i)
+            obj2 = _pick_after(words, i)
+
+            if not obj1 or not obj2 or obj1 == obj2:
+                continue
+
+            if obj1 not in positions:
+                positions[obj1] = cur_pos
+                cur_pos += 1
+            if w in ('left', 'front'):
+                positions[obj2] = positions[obj1] + 1
+            elif w in ('right', 'behind'):
+                positions[obj2] = positions[obj1] - 1
+            elif w == 'above':
+                positions[obj2] = positions[obj1] + 1
+            elif w == 'below':
+                positions[obj2] = positions[obj1] - 1
+
+    if not positions:
+        return 'unknown'
+
+    q_words = [clean(w) for w in question.split()]
+    q       = ' '.join(q_words)
+
+    if 'rightmost' in q or ('right' in q_words and 'most' in q_words):
+        return max(positions, key=positions.get)
+    if 'leftmost' in q or ('left' in q_words and 'most' in q_words):
+        return min(positions, key=positions.get)
+    if 'bottom' in q_words or 'lowest' in q_words:
+        return max(positions, key=positions.get)
+    if 'top' in q_words or 'highest' in q_words:
+        return min(positions, key=positions.get)
+
+    if 'directly' in q_words:
+        for obj in positions:
+            if obj in q_words:
+                ref = positions[obj]
+                if 'below' in q_words or 'under' in q_words:
+                    tgt = ref + 1
+                elif 'above' in q_words or 'over' in q_words:
+                    tgt = ref - 1
+                else:
+                    continue
+                for cand, pos in positions.items():
+                    if pos == tgt and cand != obj:
+                        return cand
+
+    if q_words and q_words[0] == 'is':
+        q_ents = [w for w in q_words if w in positions]
+        if len(q_ents) >= 2:
+            a, b   = q_ents[0], q_ents[1]
+            pa, pb = positions[a], positions[b]
+            if 'left' in q_words:
+                return 'yes' if pa < pb else 'no'
+            if 'right' in q_words:
+                return 'yes' if pa > pb else 'no'
+            if 'above' in q_words:
+                return 'yes' if pa < pb else 'no'
+
+    for obj in positions:
+        if obj in q_words:
+            if 'right' in q_words:
+                tgt = positions[obj] + 1
+            elif 'left' in q_words:
+                tgt = positions[obj] - 1
+            else:
+                continue
+            for cand, pos in positions.items():
+                if pos == tgt and cand != obj:
+                    return cand
+
+    if 'between' in q_words:
+        q_ents = [w for w in q_words if w in positions]
+        if len(q_ents) >= 2:
+            pa  = positions[q_ents[0]]
+            pb  = positions[q_ents[-1]]
+            mid = (pa + pb) / 2
+            best = min(
+                (e for e in positions if e not in q_ents),
+                key=lambda x: abs(positions[x] - mid),
+                default=None,
+            )
+            if best:
+                return best
+
+    return list(positions.keys())[0]
+
+
+def fixed_temporal_v3(story: str, question: str) -> str:
+    """Temporal v3: skips generic label words (event, task, phase)."""
+    LABEL_SKIP = {'event', 'task', 'phase', 'step'}
+
+    def _noun_after_v3(words, idx):
+        for w in words[idx + 1:]:
+            if (w not in STOPWORDS and w not in LABEL_SKIP
+                    and len(w) > 0 and w.isalpha()):
+                return w
+        return ''
+
+    sentences  = [s.strip() for s in story.split('.') if s.strip()]
+    BEFORE     = {'before', 'earlier', 'prior', 'first'}
+    AFTER      = {'after', 'later', 'following'}
+    LONGER     = {'longer', 'more', 'greater', 'larger'}
+    SHORTER    = {'shorter', 'less', 'fewer', 'smaller'}
+    DUR_VERBS  = {'lasted', 'took', 'takes', 'lasts', 'spent', 'continued'}
+
+    order     = []
+    durations = {}
+
+    for sent in sentences:
+        words = [clean(w) for w in sent.split()]
+
+        for i, w in enumerate(words):
+            if w in DUR_VERBS:
+                entity = ''
+                for j in range(i - 1, -1, -1):
+                    if (words[j] not in STOPWORDS
+                            and words[j] not in LABEL_SKIP
+                            and words[j].isalpha()
+                            and words[j] not in DUR_VERBS):
+                        entity = words[j]
+                        break
+                for j in range(i + 1, len(words)):
+                    if words[j].isdigit():
+                        if entity:
+                            durations[entity] = int(words[j])
+                        break
+                else:
+                    if entity and entity not in durations:
+                        durations[entity] = len(durations)
+
+        if 'longer' in words or 'more' in words:
+            ns = [w for w in words
+                  if w not in STOPWORDS and w.isalpha()
+                  and w not in DUR_VERBS
+                  and w not in ('longer', 'than', 'more', 'less')
+                  and w not in LABEL_SKIP]
+            if len(ns) >= 2:
+                durations[ns[0]] = 100
+                durations[ns[1]] = 50
+
+        for i, w in enumerate(words):
+            if w in BEFORE:
+                subj = get_sentence_subject(words, i)
+                if not subj:
+                    subj = find_noun_before(words, i)
+                obj = _noun_after_v3(words, i)
+                if subj and obj and subj != obj:
+                    if subj not in order:
+                        if obj in order:
+                            order.insert(order.index(obj), subj)
+                        else:
+                            order.append(subj)
+                    if obj not in order:
+                        order.append(obj)
+            elif w in AFTER:
+                subj = get_sentence_subject(words, i)
+                if not subj:
+                    subj = find_noun_before(words, i)
+                obj = _noun_after_v3(words, i)
+                if subj and obj and subj != obj:
+                    if obj not in order:
+                        if subj in order:
+                            order.insert(order.index(subj), obj)
+                        else:
+                            order.insert(0, obj)
+                    if subj not in order:
+                        order.append(subj)
+
+    q_words = [clean(w) for w in question.split()]
+
+    if any(w in q_words for w in LONGER) and durations:
+        return max(durations, key=durations.get)
+    if any(w in q_words for w in SHORTER) and durations:
+        return min(durations, key=durations.get)
+
+    if not order:
+        return 'unknown'
+
+    if any(w in q_words for w in ('first', 'earliest', 'oldest', 'start')):
+        return order[0]
+    if any(w in q_words for w in ('last', 'latest', 'newest', 'end')):
+        return order[-1]
+    if 'second' in q_words:
+        return order[1] if len(order) > 1 else order[0]
+    if 'third' in q_words:
+        return order[2] if len(order) > 2 else order[-1]
+
+    q_nouns = [w for w in q_words
+               if w not in STOPWORDS and len(w) > 2
+               and w.isalpha()
+               and w not in ('first', 'last', 'who',
+                             'what', 'happened', 'acted')]
+    if q_nouns and q_nouns[0] in order:
+        return order[0] if 'first' in q_words else order[-1]
+
+    return order[0]
+
+
+def fixed_multihop_v4(story: str, question: str) -> str:
+    """Multi-hop v4: COMPOSE_V3 table + INVERSE_V3 for reversed questions."""
+    RELATION_WORDS = {
+        'father', 'mother', 'son', 'daughter',
+        'brother', 'sister', 'parent', 'child',
+        'grandfather', 'grandmother', 'grandchild',
+        'uncle', 'aunt', 'nephew', 'niece',
+        'sibling', 'spouse', 'husband', 'wife',
+    }
+
+    sentences = [s.strip() for s in story.split('.') if s.strip()]
+    relations = []
+
+    for sent in sentences:
+        words = [clean(w) for w in sent.split()]
+        for i, w in enumerate(words):
+            if w not in RELATION_WORDS:
+                continue
+            subj = words[0]
+            obj  = ''
+            for j in range(i - 1, 0, -1):
+                cand = words[j].rstrip("'s")
+                if (cand not in STOPWORDS
+                        and cand.isalpha()
+                        and cand not in RELATION_WORDS):
+                    obj = cand
+                    break
+            relations.append((subj, w, obj))
+
+    if not relations:
+        return 'unknown'
+
+    chain = tuple(r[1] for r in relations)
+
+    # Detect reversed question: "What is N to M?" when story says "M is N's son"
+    if len(relations) == 1:
+        q_words = [clean(w) for w in question.split()]
+        q_ents  = [w for w in q_words
+                   if w.isalpha()
+                   and w not in STOPWORDS
+                   and w not in {'what', 'who', 'is', 'are',
+                                 'to', 'relation', 'relationship'}
+                   and w not in RELATION_WORDS]
+        subj, rel, obj = relations[0]
+        if q_ents and obj and q_ents[0] == obj:
+            return INVERSE_V3.get(rel, rel)
+
+    if chain in COMPOSE_V3:
+        return COMPOSE_V3[chain]
+
+    for length in range(len(chain) - 1, 1, -1):
+        for start in range(len(chain) - length + 1):
+            sub = chain[start:start + length]
+            if sub in COMPOSE_V3:
+                return COMPOSE_V3[sub]
+
+    return relations[0][1] if relations else 'unknown'
+
+
+# ═══════════════════════════════════════════════════════
 # EVALUATION
 # ═══════════════════════════════════════════════════════
 
