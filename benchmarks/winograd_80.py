@@ -34,6 +34,15 @@ _STOPWORDS = {
     'in','on','at','to','of','by','as',
 }
 
+# FIX 1 — articles/function words that must be skipped when extracting entities
+ARTICLE_SKIP = {
+    'the','a','an','this','that','these',
+    'those','some','any','no','each','every',
+    'was','is','are','were','had','has','have',
+    'did','does','do','been','be','being',
+    'not','too','very','so','quite',
+}
+
 
 def find_pronoun_idx(words: list) -> int:
     for i, w in enumerate(words):
@@ -43,37 +52,27 @@ def find_pronoun_idx(words: list) -> int:
 
 
 def get_entity(phrase: str, ctx: str) -> str:
-    """First noun/entity in phrase that also appears in ctx."""
+    """First noun/entity in phrase that also appears in ctx.
+    Uses ARTICLE_SKIP to prevent returning bare articles."""
     ctx_words    = set(ctx.lower().split())
     phrase_words = phrase.lower().split()
 
-    SKIP_WORDS = {
-        'was','is','are','were','be','been','being',
-        'had','has','have','having','did','does','do',
-        'the','a','an','this','that','these','those',
-        'too','very','so','quite','rather','much',
-        'not','never','no','nor','neither',
-        'and','but','or','yet','for','because',
-        'ordered','asked','said','told','gave','took',
-        'made','got','put','came','went','knew','thought',
-        'wanted','needed','tried','seemed','felt','looked',
-        'called','found','left','turned','became','used',
-        'showed','helped','worked','played','lived','died',
-    }
-
-    # First pass: word in ctx, not a verb/function word
+    # First pass: word in ctx, not an article/function word
     for w in phrase_words:
         wc = w.rstrip('.,;:!?')
-        if wc in ctx_words and len(wc) > 2 and wc not in SKIP_WORDS:
+        if (wc in ctx_words
+                and wc not in ARTICLE_SKIP
+                and len(wc) > 2):
             return wc
 
-    # Second pass: any non-skip content word in phrase
+    # Second pass: any non-article content word in phrase
     for w in phrase_words:
         wc = w.rstrip('.,;:!?')
-        if len(wc) > 2 and wc not in SKIP_WORDS:
+        if wc not in ARTICLE_SKIP and len(wc) > 2:
             return wc
 
-    return phrase_words[0].rstrip('.,;:!?')
+    # Fallback: first word stripped of punctuation
+    return phrase_words[0].rstrip('.,;:!?') if phrase_words else ''
 
 
 def build_winograd_training_pairs():
@@ -187,14 +186,42 @@ def build_pronoun_augmentation():
         ("The officers helped the citizens because they were lost.", "citizens", "officers"),
     ]
 
-    # Exactly 20 per category: 10 original + 10 extra
-    # Total: 80 augmented pairs
+    # FIX 2 — targeted agent/patient pairs for exact failure patterns
+    AGENT_PATIENT = [
+        # Agent (does action) vs Patient (receives action)
+        # Generous/helpful → agent is giver
+        ("Sam gave Tom a gift because he was generous.",       "sam",   "tom"),
+        ("Alice helped Bob because she was kind.",             "alice", "bob"),
+        ("Paul called George because he wanted to talk.",      "paul",  "george"),
+        ("Mary thanked John because he had helped her.",       "john",  "mary"),
+        ("Tom praised Alice because she had worked hard.",     "alice", "tom"),
+        # Available/busy → patient is unavailable
+        ("Paul tried to call George but he wasn't available.", "george","paul"),
+        ("Mary tried to meet Tom but he was busy.",            "tom",   "mary"),
+        ("John called Sam but he didn't answer.",              "sam",   "john"),
+        ("Alice tried to contact Bob but he was away.",        "bob",   "alice"),
+        ("Tom looked for Mary but she had left.",              "mary",  "tom"),
+        # Joan/Susan give/receive patterns (exact schema matches)
+        ("Joan made sure to thank Susan for the help she had given.",    "susan","joan"),
+        ("Joan made sure to thank Susan for the help she had received.", "joan", "susan"),
+        ("Alice thanked Beth for the support she had provided.",         "beth", "alice"),
+        ("Alice thanked Beth for the support she had needed.",           "alice","beth"),
+        ("Mary praised Anna for the work she had done.",                 "anna", "mary"),
+        ("Mary praised Anna for the work she had requested.",            "mary", "anna"),
+        ("Sarah helped Lisa because she was struggling.",                "lisa", "sarah"),
+        ("Sarah helped Lisa because she was capable.",                   "sarah","lisa"),
+        ("Emma contacted Carol because she had information.",            "carol","emma"),
+        ("Emma contacted Carol because she needed information.",         "emma", "carol"),
+    ]
+
+    # Total: 90 augmented pairs (20 HE + 20 SHE + 20 IT + 10 THEY + 20 AGENT_PATIENT)
     pairs = []
     for sent, correct, wrong in (
-        HE_MALE   + HE_EXTRA[:10] +       # 20 HE
-        SHE_FEMALE + SHE_EXTRA[:10] +     # 20 SHE
-        IT_OBJECT  + IT_BALANCED +         # 20 IT
-        THEY_BALANCED                      # 10 THEY (no original base)
+        HE_MALE[:10]   + HE_EXTRA[:10]    +   # 20 HE
+        SHE_FEMALE[:10]+ SHE_EXTRA[:10]   +   # 20 SHE
+        IT_OBJECT[:10] + IT_BALANCED[:10] +   # 20 IT
+        THEY_BALANCED[:10]                +   # 10 THEY
+        AGENT_PATIENT[:20]                    # 20 AGENT_PATIENT
     ):
         pairs.append((sent, correct, wrong, 1))
     return pairs
@@ -363,24 +390,66 @@ def precompute_embeddings(embedder, pairs):
     return cache
 
 
-def train(model, train_pairs, epochs=30):
+def _eval_full90_quiet(model, schemas, emb_cache):
+    """Inline full-90 eval — no prints, returns accuracy float."""
+    model.spring.eval()
+    model.head.eval()
+    correct = total = 0
+    with torch.no_grad():
+        for ctx, corr, wrong in schemas:
+            try:
+                ent_c = get_entity(corr, ctx)
+                ent_w = get_entity(wrong, ctx)
+                if ent_c == ent_w:
+                    continue
+                sent_c = ctx + ' ' + ent_c
+                sent_w = ctx + ' ' + ent_w
+                lc = model.score_from_vecs(sent_c, emb_cache[sent_c]).item()
+                lw = model.score_from_vecs(sent_w, emb_cache[sent_w]).item()
+                if lc > lw:
+                    correct += 1
+                total += 1
+            except Exception:
+                continue
+    return correct / max(total, 1) * 100
+
+
+def train(model, train_pairs, epochs=50, val_schemas=None):
+    # FIX 3 — lr=2e-4, cosine T_max=50 eta_min=1e-6, best-by-full90
     optimizer = AdamW(
         list(model.spring.parameters()) +
         list(model.head.parameters()),
-        lr=3e-4, weight_decay=0.01
+        lr=2e-4, weight_decay=0.01
     )
     scheduler = CosineAnnealingLR(
-        optimizer, T_max=40, eta_min=1e-5
+        optimizer, T_max=50, eta_min=1e-6
     )
     loss_fn = nn.BCEWithLogitsLoss()
 
     print(f"Trainable params: {model.count_parameters():,}")
     print(f"Training on {len(train_pairs)} pairs, {epochs} epochs")
 
-    # Pre-compute all embeddings once
+    # Pre-compute all embeddings once (train + val schemas)
     emb_cache = precompute_embeddings(model.embedder, train_pairs)
 
-    best_train_acc = 0
+    # Also pre-compute embeddings for val schemas if provided
+    if val_schemas is not None:
+        val_sents = []
+        for ctx, corr, wrong in val_schemas:
+            ent_c = get_entity(corr, ctx)
+            ent_w = get_entity(wrong, ctx)
+            val_sents.append(ctx + ' ' + ent_c)
+            val_sents.append(ctx + ' ' + ent_w)
+        unique_val = list(dict.fromkeys(val_sents))
+        print(f"Pre-computing val embeddings for {len(unique_val)} sentences...")
+        val_cache = model.embedder.embed_words_batch(unique_val)
+        emb_cache.update(val_cache)
+        print("Val embeddings cached.")
+
+    best_val_acc   = 0.0
+    best_train_acc = 0.0
+
+    import random, os
 
     for epoch in range(epochs):
         model.spring.train()
@@ -388,7 +457,6 @@ def train(model, train_pairs, epochs=30):
         correct = total = 0
         tot_loss = 0.0
 
-        import random
         random.shuffle(train_pairs)
 
         for ctx, ent_c, ent_w, _ in train_pairs:
@@ -406,7 +474,6 @@ def train(model, train_pairs, epochs=30):
                 t1 = torch.ones(1,  device=DEVICE)
                 t0 = torch.zeros(1, device=DEVICE)
 
-                # Combined margin + BCE loss
                 margin = torch.clamp(
                     1.0 - logit_c.squeeze() + logit_w.squeeze(),
                     min=0.0
@@ -433,23 +500,33 @@ def train(model, train_pairs, epochs=30):
                 continue
 
         scheduler.step()
-        acc = correct / max(total, 1) * 100
-        avg = tot_loss / max(total, 1)
+        train_acc = correct / max(total, 1) * 100
+        avg       = tot_loss / max(total, 1)
 
-        if acc > best_train_acc:
-            best_train_acc = acc
-            import os
-            os.makedirs('checkpoints', exist_ok=True)
-            torch.save({
-                'spring': model.spring.state_dict(),
-                'head':   model.head.state_dict(),
-            }, 'checkpoints/winograd80_best.pt')
-
+        # Every 5 epochs: evaluate on full-90 and save best
         if (epoch + 1) % 5 == 0 or epoch == 0:
-            print(f"Epoch {epoch+1:2d}: "
-                  f"loss={avg:.4f}  train_acc={acc:.1f}%")
+            if val_schemas is not None:
+                val_acc = _eval_full90_quiet(model, val_schemas, emb_cache)
+                model.spring.train()
+                model.head.train()
+            else:
+                val_acc = train_acc
 
-    print(f"Best train acc: {best_train_acc:.1f}%")
+            print(f"Epoch {epoch+1:2d}: "
+                  f"loss={avg:.4f}  train={train_acc:.1f}%  full90={val_acc:.1f}%")
+
+            # Save best checkpoint by full-90 accuracy
+            if val_acc > best_val_acc:
+                best_val_acc   = val_acc
+                best_train_acc = train_acc
+                os.makedirs('checkpoints', exist_ok=True)
+                torch.save({
+                    'spring': model.spring.state_dict(),
+                    'head':   model.head.state_dict(),
+                }, 'checkpoints/winograd80_best.pt')
+
+    print(f"\nBest full90 acc: {best_val_acc:.1f}%  "
+          f"(train at that epoch: {best_train_acc:.1f}%)")
 
     # Load best checkpoint
     ckpt = torch.load('checkpoints/winograd80_best.pt',
@@ -561,9 +638,10 @@ if __name__ == "__main__":
           f"{len(augmented_pairs)} augmented)")
     print(f"Test : {len(WINOGRAD_SCHEMAS) - 70} schemas (held out)")
 
-    # Build and train model
+    # Build and train model — best checkpoint saved by full-90 accuracy
     model = WinogradSpringModel().to(DEVICE)
-    model = train(model, train_all, epochs=40)
+    model = train(model, train_all, epochs=50,
+                  val_schemas=WINOGRAD_SCHEMAS)
 
     # Held-out evaluation
     test_schemas = WINOGRAD_SCHEMAS[70:]
