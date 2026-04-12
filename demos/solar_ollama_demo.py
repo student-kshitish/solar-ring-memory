@@ -39,6 +39,16 @@ def solve_with_ollama(problem: str, question: str,
     if verbose:
         print(f'   Ollama detected: {ptype}')
 
+    # Pigeonhole check — run before type-dispatch
+    from benchmarks.realworld_math import realworld_solve as rws
+    if any(w in (problem + question).lower() for w in
+           ('certain', 'guarantee', 'minimum', 'absolutely sure')):
+        result = rws(problem, question)
+        if result != 'unknown':
+            if verbose:
+                print(f'   Pigeonhole: {result}')
+            return result
+
     # Step 2: Solar Ring solves based on type
     solar_answer = 'unknown'
 
@@ -112,7 +122,11 @@ def interactive_demo(mem: UnifiedMemory):
 
         MATH_SIGNALS = ['how many', 'how far', 'how long', 'how much',
                         'what is', 'probability', 'calculate', 'solve',
-                        'find', 'percent', 'speed', 'distance']
+                        'find', 'percent', 'speed', 'distance',
+                        'minimum', 'maximum', 'certain', 'guarantee',
+                        'socks', 'balls', 'cards', 'dice', 'coin',
+                        'arrange', 'choose', 'mean', 'median', 'mode',
+                        'variance', 'interest', 'discount', 'tax', 'profit']
 
         is_math = any(s in user_input.lower() for s in MATH_SIGNALS)
 
@@ -131,12 +145,14 @@ def interactive_demo(mem: UnifiedMemory):
             print(f'Answer: {answer}')
 
         else:
+            # Only pass relevant personal facts, not benchmark data
+            personal_facts = [f for f in mem.facts
+                              if f['subject'] == mem.identity]
             facts_str = '\n'.join(
-                f'{f["subject"]} {f["predicate"]} {f["object"]}'
-                for f in mem.facts[:10]
+                f'{f["predicate"]}: {f["object"]}'
+                for f in personal_facts[:5]
             )
-            memory_ctx = f'Facts:\n{facts_str}\nRelationships:\n{mem.query("list all")}'
-
+            memory_ctx = facts_str if facts_str else 'No facts stored'
             response = ollama_chat(user_input, memory_ctx)
             print(f'Assistant: {response}')
 
