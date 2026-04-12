@@ -67,6 +67,12 @@ class UnifiedLightField(nn.Module):
         # Conflict detector
         self.W_conflict = nn.Linear(d * 2, 1)
 
+        # Learned source power scaling
+        self.W_power = nn.Linear(d, 1)
+
+        # Intensity direction (angle between source and receiver)
+        self.W_angle = nn.Linear(d * 2, 1)
+
     def c(self, domain: str) -> float:
         """Speed of light for domain."""
         if domain in self.log_c:
@@ -217,10 +223,115 @@ class UnifiedLightField(nn.Module):
             # Strong contradiction → repulsion
             return -lam * conflict * mi * mj
 
-        # Unified field
-        phi_val = lam * G_force * C * (0.5 + 0.5 * R)
+        # Include intensity (inverse square law)
+        I = self.intensity(
+            source_vec=entity_i.get('vec', torch.zeros(self.d)),
+            receiver_vec=entity_j.get('vec', torch.zeros(self.d)),
+            d_light=d_light,
+            source_mass=mi,
+            is_photon=is_photon
+        )
+
+        # Unified field with intensity
+        phi_val = lam * G_force * C * R * (0.5 + 0.5 * I)
 
         return phi_val
+
+    def intensity(self,
+                  source_vec: torch.Tensor,
+                  receiver_vec: torch.Tensor,
+                  d_light: float,
+                  source_mass: float,
+                  is_photon: bool = False) -> float:
+        """
+        Light intensity from source to receiver.
+
+        I(d) = P / (4π × d²) × e^(-d/c) × cos(θ)
+
+        P = source power = mass × ||vec||
+        d = light distance
+        cos(θ) = alignment angle = resonance
+        e^(-d/c) = redshift attenuation
+
+        Returns: intensity 0.0 to 1.0
+        """
+        # Source power
+        norm = source_vec.norm().item()
+        P = source_mass * norm
+
+        # Photon sources have infinite effective power
+        if is_photon:
+            P = 1.0
+
+        # Distance term — inverse square law
+        d_safe = max(d_light, 0.01)
+        inv_sq = P / (4 * math.pi * d_safe ** 2)
+
+        # Redshift attenuation
+        attenuation = self.redshift(d_light, is_photon)
+
+        # Angle — cosine similarity between vectors
+        if (source_vec.norm() > 1e-8 and
+            receiver_vec.norm() > 1e-8):
+            cos_theta = torch.nn.functional.cosine_similarity(
+                source_vec.unsqueeze(0),
+                receiver_vec.unsqueeze(0)
+            ).item()
+            cos_theta = max(0.0, cos_theta)  # only forward-facing
+        else:
+            cos_theta = 0.5
+
+        # Total intensity
+        I = inv_sq * attenuation * cos_theta
+
+        # Normalize to 0-1 range
+        return min(1.0, max(0.0, I))
+
+    def intensity_spectrum(self,
+                           source: dict,
+                           receivers: list,
+                           domain: str = 'relationship') -> list:
+        """
+        Compute intensity from one source to all receivers.
+        Like a star illuminating all nearby objects.
+
+        Returns list of (receiver_name, intensity, phi)
+        sorted by intensity descending.
+        """
+        results = []
+
+        for i, recv in enumerate(receivers):
+            d_hops = abs(source.get('pos', 0) - i)
+            d_light = self.light_distance(d_hops, domain)
+
+            I = self.intensity(
+                source_vec=source.get('vec',
+                                      torch.zeros(self.d)),
+                receiver_vec=recv.get('vec',
+                                      torch.zeros(self.d)),
+                d_light=d_light,
+                source_mass=source.get('mass', 0.5),
+                is_photon=source.get('is_photon', False)
+            )
+
+            # Full phi with intensity
+            recv_with_hops = dict(recv)
+            recv_with_hops['hops'] = d_hops
+            recv_with_hops['pos'] = i
+            src_with_pos = dict(source)
+            phi_val = self.phi(src_with_pos,
+                               recv_with_hops, domain)
+
+            results.append({
+                'name': recv.get('name', f'entity_{i}'),
+                'intensity': I,
+                'phi': phi_val,
+                'd_hops': d_hops,
+                'd_light': d_light,
+            })
+
+        results.sort(key=lambda x: -x['intensity'])
+        return results
 
     def phi_matrix(self, entities: list,
                    domain: str = 'relationship'

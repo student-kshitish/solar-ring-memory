@@ -52,6 +52,39 @@ def demo():
               f'd={d} d_light={d_light:.3f} '
               f'lambda={lam:.3f} Phi={phi:.3f}')
 
+    # Light intensity spectrum
+    print('\nLight intensity spectrum from Kshitish:')
+    print('(How brightly each entity illuminates memory)')
+    print()
+
+    self_entity = mem.entities[mem.identity]
+    self_entity['pos'] = 0
+
+    receivers = []
+    for name, info in mem.entities.items():
+        if name == mem.identity:
+            continue
+        conns = info.get('connections', {})
+        d = list(conns.values())[0]['hops'] if conns else 3
+        recv = dict(info)
+        recv['pos'] = d
+        receivers.append(recv)
+
+    spectrum = mem.field.intensity_spectrum(
+        self_entity, receivers, 'relationship'
+    )
+
+    print(f'  {"Name":15} {"Intensity":12} {"Phi":10} {"d_light":10} {"Visible?"}')
+    print('-'*65)
+    for r in spectrum:
+        visible = 'BRIGHT' if r['intensity'] > 0.5 else (
+                  'DIM' if r['intensity'] > 0.1 else 'DARK')
+        print(f'  {r["name"].title():15} '
+              f'{r["intensity"]:12.4f} '
+              f'{r["phi"]:10.4f} '
+              f'{r["d_light"]:10.4f} '
+              f'{visible}')
+
     # Answer questions
     print('\nAnswering questions:')
     questions = [
