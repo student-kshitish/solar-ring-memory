@@ -66,6 +66,58 @@ class GravitationalScorer(nn.Module):
     CONJS = {'and','but','or','so','yet','nor','although',
              'because','since','while','when','if','unless'}
 
+    # Semantic roles that REPEL each other
+    AGENT_WORDS = {
+        # Predators / active animals
+        'wolf','hawk','cat','lion','fox','eagle','shark',
+        'bear','cheetah','dog','tiger','leopard','crocodile',
+        # Authority figures
+        'manager','managers','teacher','teachers','parent',
+        'parents','director','directors','doctor','doctors',
+        'boss','police','officer','captain','leader','chief',
+        'employer','employers','supervisor','supervisors',
+        'principal','principals','commander','commanders',
+        'instructor','instructors','coach','coaches',
+        'judge','judges','administrator',
+        # Physical agents (cause damage)
+        'hammer','ball','rock','stone','truck','axe','knife',
+        'boot','beam','boulder','tree','pipe','dam','tank',
+        'hose','boiler',
+    }
+
+    PATIENT_WORDS = {
+        # Prey animals
+        'deer','rabbit','mouse','zebra','chicken','fish',
+        'seal','salmon','gazelle','squirrel','bird','lamb',
+        # Subordinates
+        'worker','workers','student','students','employee',
+        'employees','child','children','patient','patients',
+        'subordinate','subordinates','trainee','trainees',
+        'recruit','recruits','intern','interns',
+        # Physical patients (receive damage)
+        'window','tile','hole','vase','box','glass','bread',
+        'car','bicycle','tent','basement','valley','floor',
+        'garden','room','wall',
+        # Containers that overflow
+        'bucket','cup','mug','pond',
+    }
+
+    # Causal keywords and what they imply
+    CAUSE_IMPLIES_AGENT = {
+        # Physical/predator properties
+        'hungry','aggressive','strong','heavy','sharp',
+        'fast','powerful','angry','dominant','active',
+        # Authority/command signals
+        'obeyed','orders','commanded','instructed','directed',
+        'rules','informative','strict','experienced','clear',
+        'gave','told','set',
+    }
+    CAUSE_IMPLIES_PATIENT = {
+        'scared','afraid','weak','fragile','narrow',
+        'small','crushed','damaged','broken','overflowed',
+        'flooded','injured','hurt','destroyed',
+    }
+
     def __init__(self, d: int = 384, G: float = 1.0):
         super().__init__()
         self.d = d
@@ -138,6 +190,67 @@ class GravitationalScorer(nn.Module):
         F = G * mass_i * mass_j * cos / (r_safe ** 2)
         return F.item() if isinstance(F, torch.Tensor) else F
 
+    def semantic_role_force(self,
+                             cand_word: str,
+                             context_words: list) -> float:
+        """
+        Compute role-based force from semantic context.
+        Agent words in agent context → attraction.
+        Patient words in agent context → repulsion.
+        """
+        cw = cand_word.lower().rstrip('.,;')
+        is_agent   = cw in self.AGENT_WORDS
+        is_patient = cw in self.PATIENT_WORDS
+
+        if not is_agent and not is_patient:
+            return 0.0
+
+        ctx_lower = ' '.join(context_words).lower()
+
+        agent_signals = sum(
+            1 for w in self.CAUSE_IMPLIES_AGENT
+            if w in ctx_lower
+        )
+        patient_signals = sum(
+            1 for w in self.CAUSE_IMPLIES_PATIENT
+            if w in ctx_lower
+        )
+
+        role_score = agent_signals - patient_signals
+
+        if is_agent   and role_score > 0: return +2.0
+        if is_patient and role_score > 0: return -2.0
+        if is_agent   and role_score < 0: return -1.0
+        if is_patient and role_score < 0: return +1.0
+
+        return 0.0
+
+    def container_force(self,
+                         cand_word: str,
+                         context_words: list) -> float:
+        """
+        Containers overflow; liquids cause overflow.
+        Detects overflow/burst context and adjusts sign.
+        """
+        cw  = cand_word.lower().rstrip('.,;')
+        ctx = ' '.join(context_words).lower()
+
+        OVERFLOW_VERBS = {'overflowed','overflow','filled',
+                          'flooded','burst','leaked','sprayed'}
+        CONTAINERS     = {'bucket','glass','cup','mug','pond',
+                          'tank','pipe','dam','hose','barrel'}
+        LIQUIDS        = {'water','juice','rain','milk','beer',
+                          'oil','blood','lava','flood'}
+
+        has_overflow = any(v in ctx for v in OVERFLOW_VERBS)
+        if not has_overflow:
+            return 0.0
+
+        if cw in CONTAINERS: return +3.0
+        if cw in LIQUIDS:    return -2.0
+
+        return 0.0
+
     def score_candidate(self,
                          candidate_vec: torch.Tensor,
                          candidate_word: str,
@@ -174,11 +287,17 @@ class GravitationalScorer(nn.Module):
             # Positional distance
             r = abs(candidate_pos - j) + 1
 
-            # Gravitational force
+            # Gravitational force (cosine-based)
             F = self.gravitational_force(
                 candidate_vec, ctx_vec,
                 c_mass, ctx_mass, r
             )
+
+            # Semantic role force (agent/patient context)
+            role_F = self.semantic_role_force(
+                candidate_word, context_words
+            )
+            F += role_F
 
             total_phi += F
             if F > 0:
@@ -187,6 +306,11 @@ class GravitationalScorer(nn.Module):
                 repulsion += abs(F)
 
             n_interactions += 1
+
+        # Container/overflow force (applied once, not per token)
+        total_phi += self.container_force(
+            candidate_word, context_words
+        )
 
         net        = attraction - repulsion
         confidence = abs(net) / max(n_interactions, 1)
