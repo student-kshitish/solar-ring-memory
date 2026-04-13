@@ -78,12 +78,23 @@ def demo_pronoun():
          'george', 'paul', 'george'),
     ]
 
+    # Pre-compute MiniLM embeddings in one batch — same as evaluate()
+    all_sents = []
+    for sent, c1, c2, _ in tests:
+        all_sents.append(sent + ' ' + c1)
+        all_sents.append(sent + ' ' + c2)
+    emb = model.embedder.embed_words_batch(list(dict.fromkeys(all_sents)))
+
     correct = 0
     for sent, c1, c2, expected in tests:
         print(f'  {W}Sentence:{RE} {sent[:55]}')
         with torch.no_grad():
-            s1 = model.score_sentence(sent + ' ' + c1).item()
-            s2 = model.score_sentence(sent + ' ' + c2).item()
+            # Use score_from_vecs (higher score = correct candidate)
+            # — identical logic to evaluate() which achieves 83%
+            s1 = model.score_from_vecs(sent + ' ' + c1,
+                                       emb[sent + ' ' + c1]).item()
+            s2 = model.score_from_vecs(sent + ' ' + c2,
+                                       emb[sent + ' ' + c2]).item()
         pred = c1 if s1 > s2 else c2
         if pred == expected:
             correct += 1
