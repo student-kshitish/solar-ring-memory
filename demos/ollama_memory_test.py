@@ -23,6 +23,17 @@ def solve_any(problem, question):
     from benchmarks.prob_stats_solver import prob_stats_solve
     from benchmarks.math_unseen_test import improved_solve
 
+    tl = (problem + ' ' + question).lower()
+
+    # Route probability/stats problems directly — realworld_solve
+    # falls through to improved_solve which returns raw nums[0]
+    if any(w in tl for w in ('probability', 'chance', 'likelihood',
+                              'mean', 'median', 'mode', 'variance',
+                              'permutation', 'combination')):
+        result = prob_stats_solve(problem, question)
+        if result and result != 'unknown':
+            return result, 'Solar Ring'
+
     for solver in [realworld_solve, prob_stats_solve, improved_solve]:
         result = solver(problem, question)
         if result and result != 'unknown':
@@ -111,6 +122,17 @@ def run_test():
                        ('work', 'project', 'working')):
                     ans = f['object']
                     break
+        elif 'best friend' in ql or 'friend' in ql:
+            for name, info in mem.entities.items():
+                if name == mem.identity:
+                    continue
+                conns = info.get('connections', {})
+                for conn in conns.values():
+                    if conn.get('relationship') == 'best_friend':
+                        ans = name.title()
+                        break
+                if ans:
+                    break
 
         if not ans:
             ans = mem.query(q)
@@ -152,7 +174,7 @@ def run_test():
         ('Bag has 6 red 4 blue balls.',
          'What is probability of red?', '0.6'),
         ('A can finish job in 4 days. B in 6 days.',
-         'How long together?', '2'),
+         'How long together?', '2.4'),
         ('Rectangle length 9 width 6.',
          'What is area?', '54'),
         ('Find mean of 10 20 30 40 50.',

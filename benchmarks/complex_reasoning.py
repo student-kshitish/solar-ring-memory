@@ -336,13 +336,28 @@ def extract_causal_chain(story: str,
                     'forgot','missed','caught','flooded',
                     'damaged','failed','barked','slipped',
                 }
+                # Also filter past-tense action verbs that are
+                # not the semantic cause (e.g. "worked" in
+                # "she worked overtime" — overtime is the cause)
+                PAST_VERBS = {
+                    'worked','walked','talked','played','stayed',
+                    'waited','tried','used','called','asked',
+                    'looked','turned','moved','passed','pulled',
+                    'pushed','opened','closed','brought','left',
+                    'kept','held','stood','sat','lay','ran',
+                }
                 cause_nouns = [w for w in cause_nouns
-                               if w not in CAUSAL_VERBS]
+                               if w not in CAUSAL_VERBS
+                               and w not in PAST_VERBS
+                               and len(w) > 1]
                 effect_nouns = [w for w in effect_nouns
-                                if w not in CAUSAL_VERBS]
+                                if w not in CAUSAL_VERBS
+                                and w not in PAST_VERBS]
 
                 if cause_nouns and effect_nouns:
-                    cause = cause_nouns[0]
+                    # Take last noun — more specific than first
+                    # e.g. "she worked overtime" → overtime, not worked
+                    cause = cause_nouns[-1]
                     for eff in effect_nouns:
                         noun_cause[eff] = cause
 

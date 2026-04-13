@@ -24,9 +24,15 @@ def prob_stats_solve(problem: str, question: str) -> str:
     q = question.lower()
 
     def _fmt(v):
-        if isinstance(v, float) and v.is_integer():
-            return str(int(v))
-        return str(round(v, 4)) if isinstance(v, float) else str(v)
+        if isinstance(v, float):
+            # Only collapse to int for whole numbers >= 1 (e.g. 3.0, 54.0)
+            # Never collapse small fractions like 0.6 → 0 or 6
+            if v.is_integer() and v >= 1.0:
+                return str(int(v))
+            return str(round(v, 4))
+        if isinstance(v, list):
+            return str(v[0]) if len(v) == 1 else str(v)
+        return str(v)
 
     if 'probability' in tl or 'chance' in tl or 'likelihood' in tl:
         if 'die' in tl or 'dice' in tl:
@@ -56,6 +62,33 @@ def prob_stats_solve(problem: str, question: str) -> str:
             return _fmt(round(nums[0] * nums[1], 4))
         if 'or' in q and len(nums) >= 2:
             return _fmt(round(nums[0] + nums[1] - nums[0] * nums[1], 4))
+
+        # Bag/ball/marble/box problems — total = sum of all counts
+        # "Bag has 6 red 4 blue" → favorable/total not nums[0] alone
+        if any(w in tl for w in ('bag', 'balls', 'marbles',
+                                  'tokens', 'chips', 'box')):
+            if len(nums) >= 2:
+                total = sum(nums)
+                all_colors = ['red', 'blue', 'green', 'yellow',
+                              'black', 'white', 'orange', 'purple']
+                # Order colors by position in problem text (not fixed list)
+                present = sorted(
+                    [(c, tl.index(c)) for c in all_colors if c in tl],
+                    key=lambda x: x[1]
+                )
+                problem_colors = [c for c, _ in present]
+                for i, color in enumerate(problem_colors):
+                    if color in q and i < len(nums):
+                        favorable = nums[i]
+                        p = favorable / total
+                        if 'not' in q:
+                            p = 1 - p
+                        return _fmt(round(p, 4))
+                # fallback: first number / total
+                p = nums[0] / total
+                if 'not' in q:
+                    p = 1 - p
+                return _fmt(round(p, 4))
 
         # "X out of Y" or "X red and Y blue" → X/(X+Y)
         if len(nums) >= 2:
