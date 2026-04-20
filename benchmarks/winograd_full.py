@@ -243,6 +243,9 @@ def _pronoun_category(context: str) -> str:
 # Word-level tokenizer (shared with train_and_benchmark.py)
 # ---------------------------------------------------------------------------
 
+PRONOUNS = {"it", "he", "she", "they", "him", "her", "its", "their", "them", "hers", "his"}
+
+
 def _normalize(word: str) -> str:
     """Lowercase and strip boundary punctuation."""
     return word.lower().strip(".,!?;:\"'()-")
@@ -266,17 +269,38 @@ def _score_continuation(
     model,
     context_ids: torch.Tensor,
     continuation_ids: torch.Tensor,
+    context_words: list = None,   # Optional[List[str]] — word text for each context token
 ) -> float:
     """
     Sum of log-probabilities assigned to continuation tokens given context.
+    Activates pronoun resolution layer when context contains pronouns.
+
     Works for any model that returns (logits, _) with logits shape (1, T, V).
     Tensors must already be on the model's device.
     """
     device = _get_model_device(model)
     full_ids = torch.cat([context_ids, continuation_ids], dim=0).unsqueeze(0).to(device)
 
+    # Build pronoun_mask if model supports it (SolarRingModel does)
+    pronoun_mask  = None
+    token_texts   = None
+    has_pron_mask = hasattr(model, 'layers')  # only Solar Ring has this
+    if has_pron_mask and context_words is not None:
+        ctx_len = context_ids.shape[0]
+        cont_len = continuation_ids.shape[0]
+        full_len = ctx_len + cont_len
+        mask = [False] * full_len
+        for i, w in enumerate(context_words):
+            if w.lower().rstrip(".,;:!?") in PRONOUNS:
+                mask[i] = True
+        pronoun_mask = torch.tensor(mask, dtype=torch.bool, device=device).unsqueeze(0)
+        token_texts  = context_words + [""] * cont_len
+
     with torch.no_grad(), torch.autocast(device.type, dtype=DTYPE):
-        logits, _ = model(full_ids)  # (1, T, V)
+        if pronoun_mask is not None:
+            logits, _ = model(full_ids, pronoun_mask=pronoun_mask, token_texts=token_texts)
+        else:
+            logits, _ = model(full_ids)
 
     logits    = logits.squeeze(0).float()          # (T, V)
     log_probs = torch.log_softmax(logits, dim=-1)
@@ -318,12 +342,15 @@ def evaluate_model(
         cat_total[cat]   = cat_total.get(cat, 0) + 1
         cat_correct[cat] = cat_correct.get(cat, 0)
 
-        ctx_ids     = torch.tensor(_word_tokenize(context,     word2id), dtype=torch.long, device=device)
+        # Tokenize context keeping word texts for pronoun-mask detection
+        ctx_words   = [_normalize(w) for w in context.split() if _normalize(w)]
+        ctx_ids     = torch.tensor([word2id.get(w, word2id.get("<UNK>", 0)) for w in ctx_words],
+                                   dtype=torch.long, device=device)
         correct_ids = torch.tensor(_word_tokenize(correct_ans, word2id), dtype=torch.long, device=device)
         wrong_ids   = torch.tensor(_word_tokenize(wrong_ans,   word2id), dtype=torch.long, device=device)
 
-        sc = _score_continuation(model, ctx_ids, correct_ids)
-        sw = _score_continuation(model, ctx_ids, wrong_ids)
+        sc = _score_continuation(model, ctx_ids, correct_ids, context_words=ctx_words)
+        sw = _score_continuation(model, ctx_ids, wrong_ids,   context_words=ctx_words)
 
         if sc > sw:
             overall_correct    += 1

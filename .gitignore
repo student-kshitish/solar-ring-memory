@@ -1,10 +1,79 @@
-.venv/
-__pycache__/
+# =========================
+
+# Python
+
+# =========================
+
+**pycache**/
 *.pyc
+*.pyo
+*.pyd
+
+# =========================
+
+# Virtual Environment
+
+# =========================
+
+.venv/
+venv/
+env/
+
+# =========================
+
+# ML / AI Artifacts
+
+# =========================
+
 checkpoints/
-data/glove.6B.300d.txt
-data/glove.6B.zip
-data/glove.6B.300d.txt
-data/glove.6B.zip
 *.pt
 *.pth
+
+# =========================
+
+# Data (large files)
+
+# =========================
+
+data/
+
+# (If you want partial tracking instead, comment above and use below)
+
+# data/*.txt
+
+# data/*.zip
+
+# =========================
+
+# Logs & temp files
+
+# =========================
+
+*.log
+*.tmp
+
+# =========================
+
+# OS files
+
+# =========================
+
+.DS_Store
+Thumbs.db
+
+# =========================
+
+# IDE / Editor
+
+# =========================
+
+.vscode/
+.idea/
+
+# =========================
+
+# Git
+
+# =========================
+
+.gitignore

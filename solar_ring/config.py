@@ -51,3 +51,21 @@ CROSS_RING_LAYER = 4
 PRONOUN_LAYER = 5
 # Relation encoder: layer 7
 RELATION_LAYER = 6
+
+# ── Enhanced pronoun resolution ──────────────────────────────────────────
+# Recency decay base: 0.7^dist penalises distant antecedents
+PRONOUN_RECENCY_DECAY = 0.7
+# Confidence boost multiplier for locked (write-once) slots
+PRONOUN_CONF_SUBJ = 1.5   # SUBJ locked boost
+PRONOUN_CONF_OBJ  = 1.3   # OBJ locked boost
+# OBJ-vs-SUBJ relative prior (slight preference for subject antecedents)
+PRONOUN_OBJ_PRIOR = 0.8
+# Sun State prior weight (global context, used as fallback)
+PRONOUN_SUN_PRIOR = 0.3
+
+# ── Contrastive loss ────────────────────────────────────────────────────
+LAMBDA_CONTRASTIVE = 0.15   # weight for InfoNCE pronoun contrastive loss
+CONTRASTIVE_TEMP   = 0.07   # temperature for contrastive softmax
+
+# ── Multi-hop relation encoder ──────────────────────────────────────────
+LAMBDA_RELATION = 0.1       # weight for relation consistency loss

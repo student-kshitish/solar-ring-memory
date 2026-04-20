@@ -83,6 +83,7 @@ class SolarRingLayer(nn.Module):
         memory: SolarMemory,
         role_label: int = None,   # ground-truth role (for supervision)
         is_pronoun: bool = False,
+        pronoun_word: str = None, # actual pronoun text for gender-aware resolution
         write_enabled: bool = True,  # only layer 0 writes to memory
     ):
         """
@@ -169,17 +170,24 @@ class SolarRingLayer(nn.Module):
 
         # ── 8. Pronoun resolution (layer 6 only) ───────────────────────
         if self.layer_idx == PRONOUN_LAYER and is_pronoun:
-            resolved = memory.resolve_pronoun(x_ctx)          # (d,)
+            resolved = memory.resolve_pronoun(x_ctx, pronoun_word=pronoun_word)
             x_ctx = self.W_pro(resolved.float()).to(dtype)
 
-        # ── 9. Relation encoder (layer 7 only) ─────────────────────────
+        # ── 9. Relation encoder (layer 7 only) — multi-hop across all rings ─
         if self.layer_idx == RELATION_LAYER:
-            ring = memory.active_ring
-            subj = ring.subject_vector()
-            obj  = ring.object_vector()
-            pair = torch.cat([subj.float(), obj.float()], dim=-1)  # (2d,)
-            rel  = torch.tanh(self.W_rel(pair)).to(dtype)          # (d,)
-            x_ctx = x_ctx + rel
+            # Aggregate SUBJ-OBJ pairs from all rings (enables multi-hop reasoning)
+            rel_sum = torch.zeros(D_MODEL, device=x.device, dtype=torch.float32)
+            n_valid = 0
+            for ring in memory.rings:
+                subj = ring.subject_vector()
+                obj  = ring.object_vector()
+                if subj.norm().item() > 0.05 or obj.norm().item() > 0.05:
+                    pair    = torch.cat([subj.float(), obj.float()], dim=-1)  # (2d,)
+                    rel_sum = rel_sum + torch.tanh(self.W_rel(pair))
+                    n_valid += 1
+            if n_valid > 0:
+                rel = (rel_sum / n_valid).to(dtype)
+                x_ctx = x_ctx + rel
 
         # ── 10. Output gate + residual LayerNorm ───────────────────────
         gate_out = torch.sigmoid(self.W_out_gate(x_ctx.float())).to(dtype)

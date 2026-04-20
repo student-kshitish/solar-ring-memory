@@ -4,7 +4,35 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .config import LAMBDA_POS, LAMBDA_SPAWN, LAMBDA_RESOLVE
+from .config import (
+    LAMBDA_POS, LAMBDA_SPAWN, LAMBDA_RESOLVE,
+    LAMBDA_CONTRASTIVE, CONTRASTIVE_TEMP,
+)
+
+
+def contrastive_pronoun_loss(
+    queries:   torch.Tensor,   # (k, d) pronoun query vectors
+    positives: torch.Tensor,   # (k, d) correct antecedent vectors
+    temperature: float = CONTRASTIVE_TEMP,
+) -> torch.Tensor:
+    """
+    In-batch InfoNCE contrastive loss for pronoun resolution.
+
+    Treats all other examples in the batch as hard negatives.
+    Forces the model to distinguish the correct antecedent from distractors.
+
+    queries / positives: float tensors on same device; k ≥ 2.
+    """
+    if queries.shape[0] < 2:
+        return torch.tensor(0.0, device=queries.device)
+
+    q = F.normalize(queries.float(),   dim=-1)   # (k, d)
+    p = F.normalize(positives.float(), dim=-1)   # (k, d)
+
+    # (k, k) — similarity of every query with every positive
+    logits = (q @ p.T) / temperature             # (k, k)
+    labels = torch.arange(q.shape[0], device=q.device)
+    return F.cross_entropy(logits, labels)
 
 
 def compute_loss(
@@ -17,6 +45,7 @@ def compute_loss(
     pronoun_mask: torch.Tensor = None,   # (B, T) bool
     pronoun_targets: torch.Tensor = None, # (B, T, D) resolved vectors
     pronoun_preds: torch.Tensor = None,   # (B, T, D) predicted vectors
+    use_contrastive: bool = True,         # enable InfoNCE contrastive loss
 ) -> dict:
     """
     total = L_task + 0.3*L_pos + 0.2*L_spawn + 0.2*L_resolve
@@ -56,7 +85,9 @@ def compute_loss(
     )
 
     # L_resolve: cosine distance for pronoun resolution
-    L_resolve = torch.tensor(0.0, device=logits.device)
+    L_resolve     = torch.tensor(0.0, device=logits.device)
+    L_contrastive = torch.tensor(0.0, device=logits.device)
+
     if (pronoun_mask is not None
             and pronoun_targets is not None
             and pronoun_preds is not None):
@@ -64,16 +95,28 @@ def compute_loss(
         if mask.any():
             preds   = pronoun_preds[mask]    # (k, d)
             targets = pronoun_targets[mask]  # (k, d)
-            # cosine distance = 1 - cosine_similarity
-            cos_sim = F.cosine_similarity(preds.float(), targets.float(), dim=-1)
+
+            # Cosine distance loss
+            cos_sim   = F.cosine_similarity(preds.float(), targets.float(), dim=-1)
             L_resolve = (1.0 - cos_sim).mean()
 
-    total = L_task + LAMBDA_POS * L_pos + LAMBDA_SPAWN * L_spawn + LAMBDA_RESOLVE * L_resolve
+            # InfoNCE contrastive loss (batch negatives)
+            if use_contrastive and preds.shape[0] >= 2:
+                L_contrastive = contrastive_pronoun_loss(preds, targets)
+
+    total = (
+        L_task
+        + LAMBDA_POS         * L_pos
+        + LAMBDA_SPAWN       * L_spawn
+        + LAMBDA_RESOLVE     * L_resolve
+        + LAMBDA_CONTRASTIVE * L_contrastive
+    )
 
     return {
-        "total":    total,
-        "L_task":   L_task,
-        "L_pos":    L_pos,
-        "L_spawn":  L_spawn,
-        "L_resolve": L_resolve,
+        "total":         total,
+        "L_task":        L_task,
+        "L_pos":         L_pos,
+        "L_spawn":       L_spawn,
+        "L_resolve":     L_resolve,
+        "L_contrastive": L_contrastive,
     }

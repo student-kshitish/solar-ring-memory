@@ -66,6 +66,7 @@ class SolarRingModel(nn.Module):
         role_labels: torch.Tensor = None,   # (B, T) or (T,) int
         spawn_labels: torch.Tensor = None,  # (B, T) or (T,) float
         pronoun_mask: torch.Tensor = None,  # (B, T) or (T,) bool
+        token_texts: list = None,     # Optional[List[str]] — word strings per token
     ):
         """
         Process a sequence token by token through the ring memory.
@@ -111,6 +112,15 @@ class SolarRingModel(nn.Module):
                 role_gt = role_labels[b, t].item() if role_labels is not None else None
                 is_pron = pronoun_mask[b, t].item() if pronoun_mask is not None else False
 
+                # Resolve the actual pronoun word for gender-aware resolution
+                pron_word = None
+                if is_pron and token_texts is not None:
+                    flat_texts = token_texts[b] if (
+                        isinstance(token_texts[0], list) if token_texts else False
+                    ) else token_texts
+                    if t < len(flat_texts):
+                        pron_word = flat_texts[t]
+
                 skip_x = None
                 t_role_logits = []
                 t_spawn_logits = []
@@ -120,6 +130,7 @@ class SolarRingModel(nn.Module):
                         x, memory,
                         role_label=role_gt,
                         is_pronoun=bool(is_pron),
+                        pronoun_word=pron_word,
                         write_enabled=(layer_idx == 0),
                     )
                     t_role_logits.append(role_l)
