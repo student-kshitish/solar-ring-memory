@@ -1,0 +1,64 @@
+{
+  "siddhartha_2500": {
+    "doc_key": "siddhartha_2500",
+    "gutenberg_key": "2500",
+    "model": "biu-nlp/f-coref (FCoref, 90.5M params, RoBERTa-base)",
+    "chunk_size": 512,
+    "total_tokens": 47785,
+    "n_chunks": 89,
+    "n_gold_clusters": 9,
+    "n_gold_mentions": 4933,
+    "n_pred_clusters": 947,
+    "n_pred_mentions": 6797,
+    "peak_gpu_mb": 373,
+    "scores": {
+      "muc": {
+        "p": 68.82,
+        "r": 81.76,
+        "f": 74.74
+      },
+      "b3": {
+        "p": 48.75,
+        "r": 1.68,
+        "f": 3.24
+      },
+      "ceafe": {
+        "p": 0.22,
+        "r": 22.99,
+        "f": 0.43
+      },
+      "conll_f1": 26.14
+    }
+  },
+  "pride_and_prejudice_1342": {
+    "doc_key": "pride_and_prejudice_1342",
+    "gutenberg_key": "1342",
+    "model": "biu-nlp/f-coref (FCoref, 90.5M params, RoBERTa-base)",
+    "chunk_size": 512,
+    "total_tokens": 142742,
+    "n_chunks": 265,
+    "n_gold_clusters": 38,
+    "n_gold_mentions": 16419,
+    "n_pred_clusters": 3253,
+    "n_pred_mentions": 20950,
+    "peak_gpu_mb": 373,
+    "scores": {
+      "muc": {
+        "p": 68.7,
+        "r": 74.22,
+        "f": 71.35
+      },
+      "b3": {
+        "p": 45.03,
+        "r": 1.03,
+        "f": 2.01
+      },
+      "ceafe": {
+        "p": 0.27,
+        "r": 23.39,
+        "f": 0.54
+      },
+      "conll_f1": 24.63
+    }
+  }
+}

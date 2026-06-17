@@ -1,0 +1,170 @@
+{
+  "meta": {
+    "split_seed": 42,
+    "split_rule": "70 train / 20 test from WINOGRAD_SCHEMAS, Random(42).shuffle then last 20 sorted indices",
+    "warning": "NEVER read this file during training, validation, or checkpoint selection.",
+    "n_schemas": 20
+  },
+  "schemas": [
+    {
+      "orig_idx": 3,
+      "split_seed": 42,
+      "context": "Joan made sure to thank Susan for all the help she had received.",
+      "correct": "Joan had received help.",
+      "wrong": "Susan had received help.",
+      "pronoun_cat": "SHE"
+    },
+    {
+      "orig_idx": 4,
+      "split_seed": 42,
+      "context": "The ball broke the window because it was fragile.",
+      "correct": "The window was fragile.",
+      "wrong": "The ball was fragile.",
+      "pronoun_cat": "IT"
+    },
+    {
+      "orig_idx": 11,
+      "split_seed": 42,
+      "context": "The dog chased the cat because it was scared.",
+      "correct": "The cat was scared.",
+      "wrong": "The dog was scared.",
+      "pronoun_cat": "IT"
+    },
+    {
+      "orig_idx": 13,
+      "split_seed": 42,
+      "context": "Sam gave Tom a gift because he was grateful.",
+      "correct": "Tom was grateful.",
+      "wrong": "Sam was grateful.",
+      "pronoun_cat": "HE"
+    },
+    {
+      "orig_idx": 14,
+      "split_seed": 42,
+      "context": "The chicken was too hot to eat so it sat on the plate.",
+      "correct": "The chicken sat on the plate.",
+      "wrong": "The person sat on the plate.",
+      "pronoun_cat": "IT"
+    },
+    {
+      "orig_idx": 17,
+      "split_seed": 42,
+      "context": "The lawyer defended the criminal because he believed in justice.",
+      "correct": "The lawyer believed in justice.",
+      "wrong": "The criminal believed in justice.",
+      "pronoun_cat": "HE"
+    },
+    {
+      "orig_idx": 25,
+      "split_seed": 42,
+      "context": "The police arrested the protesters because they feared riots.",
+      "correct": "The police feared riots.",
+      "wrong": "The protesters feared riots.",
+      "pronoun_cat": "THEY"
+    },
+    {
+      "orig_idx": 27,
+      "split_seed": 42,
+      "context": "The cat sat on the mat because it was warm.",
+      "correct": "The mat was warm.",
+      "wrong": "The cat was warm.",
+      "pronoun_cat": "IT"
+    },
+    {
+      "orig_idx": 28,
+      "split_seed": 42,
+      "context": "The car hit the tree but it was not damaged.",
+      "correct": "The car was not damaged.",
+      "wrong": "The tree was not damaged.",
+      "pronoun_cat": "IT"
+    },
+    {
+      "orig_idx": 29,
+      "split_seed": 42,
+      "context": "Mike told Steve that he should apologize first.",
+      "correct": "Steve should apologize.",
+      "wrong": "Mike should apologize.",
+      "pronoun_cat": "HE"
+    },
+    {
+      "orig_idx": 31,
+      "split_seed": 42,
+      "context": "The book didn't fit in the bag because it was too shallow.",
+      "correct": "The bag was too shallow.",
+      "wrong": "The book was too shallow.",
+      "pronoun_cat": "IT"
+    },
+    {
+      "orig_idx": 35,
+      "split_seed": 42,
+      "context": "The ball didn't fit through the hole because it was too wide.",
+      "correct": "The hole was too wide.",
+      "wrong": "The ball was too wide.",
+      "pronoun_cat": "IT"
+    },
+    {
+      "orig_idx": 54,
+      "split_seed": 42,
+      "context": "Amy told Carol that she had won the prize.",
+      "correct": "Amy had won.",
+      "wrong": "Carol had won.",
+      "pronoun_cat": "SHE"
+    },
+    {
+      "orig_idx": 64,
+      "split_seed": 42,
+      "context": "The workers went on strike because they were underpaid.",
+      "correct": "The workers were underpaid.",
+      "wrong": "The managers were underpaid.",
+      "pronoun_cat": "THEY"
+    },
+    {
+      "orig_idx": 69,
+      "split_seed": 42,
+      "context": "The nurse helped the patient because she was trained.",
+      "correct": "The nurse was trained.",
+      "wrong": "The patient was trained.",
+      "pronoun_cat": "SHE"
+    },
+    {
+      "orig_idx": 75,
+      "split_seed": 42,
+      "context": "The cup broke when it fell from the table.",
+      "correct": "The cup broke.",
+      "wrong": "The table broke.",
+      "pronoun_cat": "IT"
+    },
+    {
+      "orig_idx": 76,
+      "split_seed": 42,
+      "context": "The army fought the rebels because they had invaded.",
+      "correct": "The rebels had invaded.",
+      "wrong": "The army had invaded.",
+      "pronoun_cat": "THEY"
+    },
+    {
+      "orig_idx": 80,
+      "split_seed": 42,
+      "context": "The tree fell on the car and it was crushed.",
+      "correct": "The car was crushed.",
+      "wrong": "The tree was crushed.",
+      "pronoun_cat": "IT"
+    },
+    {
+      "orig_idx": 81,
+      "split_seed": 42,
+      "context": "The pipe burst and it flooded the basement.",
+      "correct": "The pipe flooded the basement.",
+      "wrong": "The basement flooded the pipe.",
+      "pronoun_cat": "IT"
+    },
+    {
+      "orig_idx": 87,
+      "split_seed": 42,
+      "context": "The judge ruled against the defendant because he lied.",
+      "correct": "The defendant lied.",
+      "wrong": "The judge lied.",
+      "pronoun_cat": "HE"
+    }
+  ]
+}

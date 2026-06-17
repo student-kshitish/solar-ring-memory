@@ -1,0 +1,94 @@
+{
+  "siddhartha_2500": {
+    "doc_key": "siddhartha_2500",
+    "n_chunks": 89,
+    "n_gold_entities": 9,
+    "n_gold_mentions": 4933,
+    "n_pred_clusters_base": 947,
+    "n_pred_clusters_memory": 196,
+    "emb_threshold": 0.85,
+    "scores_before": {
+      "muc": {
+        "p": 68.82,
+        "r": 81.76,
+        "f": 74.74
+      },
+      "b3": {
+        "p": 48.75,
+        "r": 1.68,
+        "f": 3.24
+      },
+      "ceafe": {
+        "p": 0.22,
+        "r": 22.99,
+        "f": 0.43
+      },
+      "conll_f1": 26.14
+    },
+    "scores_after": {
+      "muc": {
+        "p": 66.22,
+        "r": 88.77,
+        "f": 75.85
+      },
+      "b3": {
+        "p": 26.28,
+        "r": 41.48,
+        "f": 32.17
+      },
+      "ceafe": {
+        "p": 0.94,
+        "r": 20.51,
+        "f": 1.8
+      },
+      "conll_f1": 36.61
+    },
+    "delta_conll_f1": 10.47
+  },
+  "pride_and_prejudice_1342": {
+    "doc_key": "pride_and_prejudice_1342",
+    "n_chunks": 265,
+    "n_gold_entities": 38,
+    "n_gold_mentions": 16419,
+    "n_pred_clusters_base": 3253,
+    "n_pred_clusters_memory": 615,
+    "emb_threshold": 0.85,
+    "scores_before": {
+      "muc": {
+        "p": 68.7,
+        "r": 74.22,
+        "f": 71.35
+      },
+      "b3": {
+        "p": 45.03,
+        "r": 1.03,
+        "f": 2.01
+      },
+      "ceafe": {
+        "p": 0.27,
+        "r": 23.39,
+        "f": 0.54
+      },
+      "conll_f1": 24.63
+    },
+    "scores_after": {
+      "muc": {
+        "p": 69.91,
+        "r": 86.79,
+        "f": 77.44
+      },
+      "b3": {
+        "p": 12.37,
+        "r": 41.03,
+        "f": 19.0
+      },
+      "ceafe": {
+        "p": 0.67,
+        "r": 10.83,
+        "f": 1.26
+      },
+      "conll_f1": 32.57
+    },
+    "delta_conll_f1": 7.94
+  }
+}
