@@ -138,4 +138,34 @@ class PairScorer(Protocol):
   decider.
 - Any evaluation stays **sealed-once**: do not tune on WSC273 or the sealed
   books. Fit the projector + pair scorer on training coref data only.
-```
+
+## A100 checklist (tomorrow)
+
+> Steps 1–2 implemented (CPU, untrained plumbing); 3–6 are A100 work; path is
+> unproven until step 4 validates space alignment.
+
+- **Step 3 (A100) — train the projector + pair head jointly.** Fit
+  `SrmAntecedentProjector` (300→256) together with `pair_ffn` on coref data
+  containing cross-window links. A randomly-initialised projector maps SRM
+  vectors to noise, so the CPU plumbing (`gather_srm_antecedents`,
+  `build_virtual_antecedents`, `prepend_to_pairwise`) produces correct shapes
+  but **meaningless values until this training runs**.
+
+- **Step 4 (A100) — RISK: validate that the 300-d SRM space aligns with the
+  256-d span space.** SRM vectors (GloVe/physics-derived) and RoBERTa span
+  reprs are unrelated spaces; a single `Linear` may be too weak to bridge them.
+  **Measure cross-window dev F1 before believing anything.** If it is poor,
+  upgrade the projector to an MLP or add contrastive SRM↔span alignment. This is
+  a **live falsification risk** — the whole cross-window path could be a clean
+  null, and that is an acceptable, honest outcome to report.
+
+- **Step 5 (config) — distance bucket for huge cross-window gaps.** Confirm
+  `distance_bucket` saturates gracefully for the large (virtual) gaps between an
+  SRM antecedent and a current-chunk anaphor, or add one dedicated
+  "cross-window" bucket to `DIST_BUCKET_EDGES` (grows the embedding table by one
+  row — a config change, not logic).
+
+- **Step 6 (A100) — sealed eval.** Evaluate on BookCoref documents where the
+  antecedent lives in an earlier chunk, with SRM memory populated. Fit on the
+  train split only; keep the eval **sealed-once**. WSC273 and the sealed books
+  stay sealed — no tuning against them.
